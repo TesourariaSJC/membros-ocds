@@ -1,7 +1,6 @@
 import os
-import base64
 import streamlit as st
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # Configuração da página
@@ -31,7 +30,6 @@ try:
         __tablename__ = "membros"
 
         id = Column(Integer, primary_key=True)
-        # Dados Pessoais
         nome = Column(String(200), nullable=False)
         nome_religioso = Column(String(200))
         data_nascimento = Column(String(30))
@@ -45,7 +43,6 @@ try:
         comunidade = Column(String(150))
         regional = Column(String(150))
 
-        # Dados da Caminhada OCDS
         data_entrada = Column(String(30))
         data_admissao = Column(String(30))
         quem_realizou_admissao = Column(String(200))
@@ -57,7 +54,6 @@ try:
         quem_realizou_votos = Column(String(200))
         data_sanatio = Column(String(30))
 
-        # Relacionamento com Afastamentos
         afastamentos = relationship("Afastamento", back_populates="membro", cascade="all, delete-orphan")
 
     class Afastamento(Base):
@@ -108,7 +104,7 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- DADOS DOS USUÁRIOS E SENHAS ---
+# --- USUÁRIOS DO SISTEMA ---
 if "usuarios_db" not in st.session_state:
     st.session_state["usuarios_db"] = {
         "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
@@ -123,10 +119,7 @@ if "usuario_nome" not in st.session_state:
 if "usuario_role" not in st.session_state:
     st.session_state["usuario_role"] = ""
 
-# --- BRASÃO OFICIAL EM BASE64 PARA EVITAR DEPENDÊNCIA EXTERNA ---
-BRASAO_URL = "https://i.ibb.co/3S4f4R4/brasao-ocds.jpg" # URL direta de contingência
-
-# --- CABEÇALHO PERSONALIZADO ---
+# --- CABEÇALHO PERSONALIZADO OCDS ---
 def render_header():
     st.markdown("""
         <style>
@@ -190,7 +183,6 @@ render_header()
 user_role = st.session_state["usuario_role"]
 user_name = st.session_state["usuario_nome"]
 
-# Menu Lateral com Ícones
 st.sidebar.markdown(f"👤 **Usuário:** {user_name}")
 st.sidebar.caption(f"Perfil: {user_role.upper()}")
 
@@ -202,14 +194,13 @@ if st.sidebar.button("🚪 Sair / Logout"):
 
 st.sidebar.divider()
 
-# Requisito 1 & 2: Opções de menu visíveis na sidebar por perfil
 if user_role == "adm":
     opcoes_menu = [
         "📋 Listar Membros",
         "➕ Cadastrar Novo",
         "✏️ Editar / Afastamentos / Excluir",
         "📊 Relatórios e Estatísticas",
-        "🔐 Gestão de Senhas"
+        "🔐 Gestão e Manutenção"
     ]
 elif user_role == "inclusao":
     opcoes_menu = [
@@ -217,7 +208,7 @@ elif user_role == "inclusao":
         "➕ Cadastrar Novo",
         "📊 Relatórios e Estatísticas"
     ]
-else: # visualização
+else:
     opcoes_menu = [
         "📋 Listar Membros",
         "📊 Relatórios e Estatísticas"
@@ -292,19 +283,24 @@ elif menu == "➕ Cadastrar Novo":
             if not nome:
                 st.error("O campo Nome Completo é obrigatório!")
             else:
-                novo_membro = Membro(
-                    nome=nome, nome_religioso=nome_religioso, data_nascimento=data_nascimento,
-                    rg=rg, cpf=cpf, estado_civil=estado_civil, conjuge=conjuge,
-                    endereco=endereco, bairro=bairro, cidade=cidade, comunidade=comunidade,
-                    regional=regional, data_entrada=data_entrada, data_admissao=data_admissao,
-                    quem_realizou_admissao=quem_realizou_admissao, data_promessas_temp=data_promessas_temp,
-                    quem_realizou_promessas_temp=quem_realizou_promessas_temp,
-                    data_promessas_def=data_promessas_def, quem_realizou_promessas_def=quem_realizou_promessas_def,
-                    data_votos=data_votos, quem_realizou_votos=quem_realizou_votos, data_sanatio=data_sanatio
-                )
-                db.add(novo_membro)
-                db.commit()
-                st.success(f"Membro '{nome}' cadastrado com sucesso!")
+                # Verificação de duplicados
+                existente = db.query(Membro).filter(func.lower(Membro.nome) == nome.strip().lower()).first()
+                if existente:
+                    st.warning(f"⚠️ O membro '{nome}' já possui cadastro no banco (ID #{existente.id}).")
+                else:
+                    novo_membro = Membro(
+                        nome=nome.strip(), nome_religioso=nome_religioso, data_nascimento=data_nascimento,
+                        rg=rg, cpf=cpf, estado_civil=estado_civil, conjuge=conjuge,
+                        endereco=endereco, bairro=bairro, cidade=cidade, comunidade=comunidade,
+                        regional=regional, data_entrada=data_entrada, data_admissao=data_admissao,
+                        quem_realizou_admissao=quem_realizou_admissao, data_promessas_temp=data_promessas_temp,
+                        quem_realizou_promessas_temp=quem_realizou_promessas_temp,
+                        data_promessas_def=data_promessas_def, quem_realizou_promessas_def=quem_realizou_promessas_def,
+                        data_votos=data_votos, quem_realizou_votos=quem_realizou_votos, data_sanatio=data_sanatio
+                    )
+                    db.add(novo_membro)
+                    db.commit()
+                    st.success(f"Membro '{nome}' cadastrado com sucesso!")
 
 # --- OPÇÃO 3: EDITAR / AFASTAMENTOS / EXCLUIR ---
 elif menu == "✏️ Editar / Afastamentos / Excluir":
@@ -428,7 +424,7 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                     st.success("Afastamento registrado!")
                     st.rerun()
 
-# --- OPÇÃO 4: RELATÓRIOS (REQUISITO 3: FILTRO POR REGIONAL E COMUNIDADE) ---
+# --- OPÇÃO 4: RELATÓRIOS ---
 elif menu == "📊 Relatórios e Estatísticas":
     st.subheader("📊 Relatórios e Indicadores OCDS")
     
@@ -480,20 +476,16 @@ elif menu == "📊 Relatórios e Estatísticas":
         st.markdown("### 📈 Resumo Estatístico da Caminhada")
         
         col_f1, col_f2 = st.columns(2)
-        
-        # Filtro por Regional
         with col_f1:
             regionais = list(set([m.regional for m in membros if m.regional]))
             regionais.insert(0, "Todas as Regionais")
             filtro_reg = st.selectbox("Filtrar por Regional:", regionais)
 
-        # Filtro por Comunidade
         with col_f2:
             comunidades = list(set([m.comunidade for m in membros if m.comunidade]))
             comunidades.insert(0, "Todas as Comunidades")
             filtro_com = st.selectbox("Filtrar por Comunidade:", comunidades)
 
-        # Aplicação dos Filtros
         membros_filtrados = membros
         if filtro_reg != "Todas as Regionais":
             membros_filtrados = [m for m in membros_filtrados if m.regional == filtro_reg]
@@ -526,26 +518,57 @@ elif menu == "📊 Relatórios e Estatísticas":
             })
         st.dataframe(dados_resumo, use_container_width=True)
 
-# --- OPÇÃO 5: GESTÃO DE SENHAS (EXCLUSIVO PARA ADMINISTRADOR - REQUISITO 2) ---
-elif menu == "🔐 Gestão de Senhas" and user_role == "adm":
-    st.subheader("🔐 Alteração e Gerenciamento de Senhas")
-    st.info("Como Administrador, você pode alterar a senha dos perfis do sistema nesta aba.")
+# --- OPÇÃO 5: GESTÃO E MANUTENÇÃO (ADM) ---
+elif menu == "🔐 Gestão e Manutenção" and user_role == "adm":
+    st.subheader("🔐 Gestão de Senhas e Manutenção da Base")
+    
+    tab_senha, tab_limpeza = st.tabs(["Alteração de Senhas", "🧹 Limpeza de Membros Duplicados"])
 
-    users = st.session_state["usuarios_db"]
-    usuario_alvo = st.selectbox("Selecione o usuário:", list(users.keys()), format_func=lambda u: f"{u} ({users[u]['nome']})")
+    with tab_senha:
+        st.markdown("#### Alteração de Senhas dos Usuários")
+        users = st.session_state["usuarios_db"]
+        usuario_alvo = st.selectbox("Selecione o usuário:", list(users.keys()), format_func=lambda u: f"{u} ({users[u]['nome']})")
 
-    with st.form("form_senha"):
-        nova_senha = st.text_input("Nova Senha", type="password")
-        confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-        btn_mudar_senha = st.form_submit_button("Atualizar Senha")
+        with st.form("form_senha"):
+            nova_senha = st.text_input("Nova Senha", type="password")
+            confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
+            btn_mudar_senha = st.form_submit_button("Atualizar Senha")
 
-        if btn_mudar_senha:
-            if not nova_senha:
-                st.error("A senha não pode estar em branco.")
-            elif nova_senha != confirma_senha:
-                st.error("As senhas digitadas não coincidem.")
+            if btn_mudar_senha:
+                if not nova_senha:
+                    st.error("A senha não pode estar em branco.")
+                elif nova_senha != confirma_senha:
+                    st.error("As senhas digitadas não coincidem.")
+                else:
+                    st.session_state["usuarios_db"][usuario_alvo]["senha"] = nova_senha
+                    st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
+
+    with tab_limpeza:
+        st.markdown("#### Remover Registros Duplicados no Banco")
+        st.warning("Esta ferramenta busca por membros que possuem o mesmo Nome Completo e mantém apenas o primeiro registro (ID mais antigo), excluindo os duplicados.")
+        
+        membros_todos = db.query(Membro).order_by(Membro.id).all()
+        nomes_vistos = set()
+        duplicados_ids = []
+
+        for m in membros_todos:
+            nome_chave = m.nome.strip().lower()
+            if nome_chave in nomes_vistos:
+                duplicados_ids.append(m.id)
             else:
-                st.session_state["usuarios_db"][usuario_alvo]["senha"] = nova_senha
-                st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
+                nomes_vistos.add(nome_chave)
+
+        if duplicados_ids:
+            st.error(f"Foram encontrados **{len(duplicados_ids)} registro(s) duplicado(s)** no banco de dados.")
+            if st.button("🧹 Limpar Duplicados Agora", type="primary"):
+                for d_id in duplicados_ids:
+                    obj_dup = db.query(Membro).filter(Membro.id == d_id).first()
+                    if obj_dup:
+                        db.delete(obj_dup)
+                db.commit()
+                st.success("Limpeza concluída com sucesso! Todos os registros duplicados foram removidos.")
+                st.rerun()
+        else:
+            st.success("✅ A base de dados está limpa! Nenhum registro duplicado encontrado.")
 
 db.close()
