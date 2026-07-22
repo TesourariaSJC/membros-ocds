@@ -1,6 +1,5 @@
 import os
 import streamlit as st
-import streamlit_authenticator as stauth
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -80,67 +79,69 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- SISTEMA DE LOGIN E PERMISSÕES (REQUISITO 1) ---
-# Usuários padrão (Senhas criptografadas para ambiente de produção)
-# administrador: admin123 | inclusao: inc123 | visualizacao: vis123
-credentials = {
-    "usernames": {
-        "admin": {
-            "email": "admin@ocds.org",
-            "name": "Administrador",
-            "password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW", # admin123
-            "role": "adm"
-        },
-        "inclusao": {
-            "email": "inclusao@ocds.org",
-            "name": "Operador (Inclusão)",
-            "password": "$2b$12$4O/R6SjG5k6UFL0QxWlFie8uDk2gUsmw/6B8eJIn/D.U2o0t1y0te", # inc123
-            "role": "inclusao"
-        },
-        "leitor": {
-            "email": "leitor@ocds.org",
-            "name": "Usuário (Visualização)",
-            "password": "$2b$12$K8K3K1i2n8a/B52wX55eAeUjBmLWz8Xq/L8Fq8K9U2n8m5e/L8a2i", # vis123
-            "role": "visualizacao"
-        }
-    }
+# --- SISTEMA DE LOGIN NATIVO (REQUISITO 1) ---
+USUARIOS = {
+    "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
+    "inclusao": {"senha": "inc123", "nome": "Operador (Inclusão)", "role": "inclusao"},
+    "leitor": {"senha": "vis123", "nome": "Usuário (Visualização)", "role": "visualizacao"}
 }
 
-authenticator = stauth.Authenticate(
-    credentials,
-    "ocds_session_cookie",
-    "ocds_secret_key_12345",
-    cookie_expiry_days=1
-)
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+if "usuario_nome" not in st.session_state:
+    st.session_state["usuario_nome"] = ""
+if "usuario_role" not in st.session_state:
+    st.session_state["usuario_role"] = ""
 
-name, authentication_status, username = authenticator.login("main")
+# Tela de Login caso não esteja autenticado
+if not st.session_state["autenticado"]:
+    col_a, col_b, col_c = st.columns([1, 2, 1])
+    with col_b:
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=100)
+        st.markdown("### Ordem dos Carmelitas Descalços Seculares")
+        st.markdown("##### Província São José")
+        st.subheader("🔒 Acesso ao Sistema")
+        
+        with st.form("login_form"):
+            user_input = st.text_input("Usuário")
+            pass_input = st.text_input("Senha", type="password")
+            btn_login = st.form_submit_button("Entrar")
 
-if authentication_status is False:
-    st.error("Usuário ou senha incorretos.")
+            if btn_login:
+                if user_input in USUARIOS and USUARIOS[user_input]["senha"] == pass_input:
+                    st.session_state["autenticado"] = True
+                    st.session_state["usuario_nome"] = USUARIOS[user_input]["nome"]
+                    st.session_state["usuario_role"] = USUARIOS[user_input]["role"]
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha incorretos.")
     st.stop()
-elif authentication_status is None:
-    st.warning("Por favor, informe seu usuário e senha para acessar o sistema.")
-    st.stop()
-
-# Recupera a função do usuário logado
-user_role = credentials["usernames"][username].get("role", "visualizacao")
 
 # --- CABEÇALHO E BRASÃO DA OCDS (REQUISITO 6) ---
 def render_header():
-    col1, col2 = st.columns([1, 5])
+    col1, col2 = st.columns([1, 6])
     with col1:
-        # Brasão oficial/exemplo da OCDS
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=110)
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=100)
     with col2:
         st.markdown("<h2 style='margin-bottom: 0px;'>Ordem dos Carmelitas Descalços Seculares</h2>", unsafe_allow_html=True)
-        st.markdown("<h4 style='color: gray; margin-top: 0px;'>Província São José</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='color: #666; margin-top: 0px;'>Província São José</h4>", unsafe_allow_html=True)
     st.divider()
 
 render_header()
 
+user_role = st.session_state["usuario_role"]
+user_name = st.session_state["usuario_nome"]
+
 # Menu lateral e Logout
-st.sidebar.write(f"👤 **Usuário:** {name} ({user_role.upper()})")
-authenticator.logout("Sair", "sidebar")
+st.sidebar.write(f"👤 **Usuário:** {user_name}")
+st.sidebar.caption(f"Perfil: {user_role.upper()}")
+
+if st.sidebar.button("🚪 Sair / Logout"):
+    st.session_state["autenticado"] = False
+    st.session_state["usuario_nome"] = ""
+    st.session_state["usuario_role"] = ""
+    st.rerun()
+
 st.sidebar.divider()
 
 # Ajuste do menu de acordo com as permissões
@@ -195,7 +196,6 @@ elif menu == "Cadastrar Novo":
             bairro = st.text_input("Bairro")
             cidade = st.text_input("Cidade")
             comunidade = st.text_input("Comunidade")
-            # Requisito 5: Seleção de Regionais
             regional = st.selectbox("Regional", [
                 "1 - Regional São João da Cruz",
                 "2 - Regional Santa Teresinha do Menino Jesus e da Santa Face"
@@ -323,7 +323,6 @@ elif menu == "Editar / Afastamentos / Excluir":
                     st.warning("Membro excluído com sucesso!")
                     st.rerun()
 
-            # Tabela e Formulário de Afastamentos (Requisito 3)
             with tab2:
                 st.markdown("#### Histórico de Afastamentos")
                 afastamentos = db.query(Afastamento).filter(Afastamento.membro_id == membro.id).all()
@@ -409,7 +408,6 @@ elif menu == "Relatórios":
     else: # Relatório Geral/Comunidades
         st.markdown("### 📈 Resumo Estatístico da Caminhada")
         
-        # Filtro por Comunidade
         comunidades = list(set([m.comunidade for m in membros if m.comunidade]))
         comunidades.insert(0, "Todas (Geral)")
         filtro_com = st.selectbox("Filtrar por Comunidade:", comunidades)
@@ -418,7 +416,6 @@ elif menu == "Relatórios":
         if filtro_com != "Todas (Geral)":
             membros_filtrados = [m for m in membros if m.comunidade == filtro_com]
 
-        # Cálculos numéricos
         tot_admissao = sum(1 for m in membros_filtrados if m.data_admissao and m.data_admissao.strip() != "")
         tot_temp = sum(1 for m in membros_filtrados if m.data_promessas_temp and m.data_promessas_temp.strip() != "")
         tot_def = sum(1 for m in membros_filtrados if m.data_promessas_def and m.data_promessas_def.strip() != "")
