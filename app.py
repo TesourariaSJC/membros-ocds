@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # Configuração da página
@@ -70,7 +70,36 @@ try:
 
         membro = relationship("Membro", back_populates="afastamentos")
 
+    # Garante que as novas colunas sejam adicionadas se a tabela já existir
+    def atualizar_colunas_banco():
+        inspector = inspect(engine)
+        if inspector.has_table("membros"):
+            colunas_existentes = [c['name'] for c in inspector.get_columns("membros")]
+            novas_colunas = {
+                "comunidade": "VARCHAR(150)",
+                "regional": "VARCHAR(150)",
+                "data_entrada": "VARCHAR(30)",
+                "data_admissao": "VARCHAR(30)",
+                "quem_realizou_admissao": "VARCHAR(200)",
+                "data_promessas_temp": "VARCHAR(30)",
+                "quem_realizou_promessas_temp": "VARCHAR(200)",
+                "data_promessas_def": "VARCHAR(30)",
+                "quem_realizou_promessas_def": "VARCHAR(200)",
+                "data_votos": "VARCHAR(30)",
+                "quem_realizou_votos": "VARCHAR(200)",
+                "data_sanatio": "VARCHAR(30)"
+            }
+            with engine.connect() as conn:
+                for col, tipo in novas_colunas.items():
+                    if col not in colunas_existentes:
+                        try:
+                            conn.execute(text(f"ALTER TABLE membros ADD COLUMN {col} {tipo};"))
+                            conn.commit()
+                        except Exception:
+                            pass
+
     Base.metadata.create_all(bind=engine)
+    atualizar_colunas_banco()
 
 except Exception as e:
     st.error(f"Erro ao conectar com o banco de dados: {e}")
@@ -93,7 +122,7 @@ if "usuario_nome" not in st.session_state:
 if "usuario_role" not in st.session_state:
     st.session_state["usuario_role"] = ""
 
-# Tela de Login caso não esteja autenticado
+# Tela de Login
 if not st.session_state["autenticado"]:
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
@@ -132,7 +161,7 @@ render_header()
 user_role = st.session_state["usuario_role"]
 user_name = st.session_state["usuario_nome"]
 
-# Menu lateral e Logout
+# Menu lateral
 st.sidebar.write(f"👤 **Usuário:** {user_name}")
 st.sidebar.caption(f"Perfil: {user_role.upper()}")
 
@@ -144,12 +173,11 @@ if st.sidebar.button("🚪 Sair / Logout"):
 
 st.sidebar.divider()
 
-# Ajuste do menu de acordo com as permissões
 if user_role == "adm":
     opcoes_menu = ["Listar Membros", "Cadastrar Novo", "Editar / Afastamentos / Excluir", "Relatórios"]
 elif user_role == "inclusao":
     opcoes_menu = ["Listar Membros", "Cadastrar Novo", "Relatórios"]
-else: # visualizacao
+else:
     opcoes_menu = ["Listar Membros", "Relatórios"]
 
 menu = st.sidebar.selectbox("Navegação", opcoes_menu)
@@ -177,7 +205,7 @@ if menu == "Listar Membros":
     else:
         st.info("Nenhum membro cadastrado ainda.")
 
-# --- OPÇÃO 2: CADASTRAR (REQUISITOS 2 e 5) ---
+# --- OPÇÃO 2: CADASTRAR ---
 elif menu == "Cadastrar Novo":
     st.subheader("➕ Cadastrar Novo Membro")
     with st.form("form_cadastro"):
@@ -235,7 +263,7 @@ elif menu == "Cadastrar Novo":
                 db.commit()
                 st.success(f"Membro '{nome}' cadastrado com sucesso!")
 
-# --- OPÇÃO 3: EDITAR, AFASTAMENTOS E EXCLUIR (REQUISITO 3) ---
+# --- OPÇÃO 3: EDITAR / AFASTAMENTOS / EXCLUIR ---
 elif menu == "Editar / Afastamentos / Excluir":
     st.subheader("✏️ Edição e Registro de Afastamentos")
     membros = db.query(Membro).all()
@@ -357,7 +385,7 @@ elif menu == "Editar / Afastamentos / Excluir":
                     st.success("Afastamento registrado!")
                     st.rerun()
 
-# --- OPÇÃO 4: RELATÓRIOS (REQUISITO 4) ---
+# --- OPÇÃO 4: RELATÓRIOS ---
 elif menu == "Relatórios":
     st.subheader("📊 Relatórios e Indicadores OCDS")
     
@@ -405,7 +433,7 @@ elif menu == "Relatórios":
             else:
                 st.write("Nenhum afastamento registrado.")
 
-    else: # Relatório Geral/Comunidades
+    else:
         st.markdown("### 📈 Resumo Estatístico da Caminhada")
         
         comunidades = list(set([m.comunidade for m in membros if m.comunidade]))
