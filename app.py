@@ -1,4 +1,5 @@
 import os
+import base64
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -70,7 +71,6 @@ try:
 
         membro = relationship("Membro", back_populates="afastamentos")
 
-    # Garante que as novas colunas sejam adicionadas se a tabela já existir
     def atualizar_colunas_banco():
         inspector = inspect(engine)
         if inspector.has_table("membros"):
@@ -108,12 +108,13 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- SISTEMA DE LOGIN NATIVO (REQUISITO 1) ---
-USUARIOS = {
-    "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
-    "inclusao": {"senha": "inc123", "nome": "Operador (Inclusão)", "role": "inclusao"},
-    "leitor": {"senha": "vis123", "nome": "Usuário (Visualização)", "role": "visualizacao"}
-}
+# --- DADOS DOS USUÁRIOS E SENHAS ---
+if "usuarios_db" not in st.session_state:
+    st.session_state["usuarios_db"] = {
+        "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
+        "inclusao": {"senha": "inc123", "nome": "Operador (Inclusão)", "role": "inclusao"},
+        "leitor": {"senha": "vis123", "nome": "Usuário (Visualização)", "role": "visualizacao"}
+    }
 
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
@@ -122,47 +123,75 @@ if "usuario_nome" not in st.session_state:
 if "usuario_role" not in st.session_state:
     st.session_state["usuario_role"] = ""
 
-# Tela de Login
+# --- BRASÃO OFICIAL EM BASE64 PARA EVITAR DEPENDÊNCIA EXTERNA ---
+BRASAO_URL = "https://i.ibb.co/3S4f4R4/brasao-ocds.jpg" # URL direta de contingência
+
+# --- CABEÇALHO PERSONALIZADO ---
+def render_header():
+    st.markdown("""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
+            .header-title {
+                font-family: 'Cinzel', serif;
+                color: #4A2C11;
+                font-size: 26px;
+                font-weight: 700;
+                margin-bottom: -5px;
+                line-height: 1.2;
+            }
+            .header-subtitle {
+                font-family: 'Cinzel', serif;
+                color: #7A4B1E;
+                font-size: 18px;
+                font-weight: 600;
+                margin-top: 0px;
+                margin-bottom: 10px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns([1, 5])
+    with col1:
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=115)
+    with col2:
+        st.markdown('<div class="header-title">Ordem dos Carmelitas Descalços Seculares</div>', unsafe_allow_html=True)
+        st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
+    st.divider()
+
+# --- TELA DE LOGIN ---
 if not st.session_state["autenticado"]:
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=100)
-        st.markdown("### Ordem dos Carmelitas Descalços Seculares")
-        st.markdown("##### Província São José")
+        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=120)
+        st.markdown("<h3 style='color: #4A2C11; font-family: serif; text-align: center;'>Ordem dos Carmelitas Descalços Seculares</h3>", unsafe_allow_html=True)
+        st.markdown("<h5 style='color: #7A4B1E; font-family: serif; text-align: center; margin-top: -10px;'>Província São José</h5>", unsafe_allow_html=True)
+        st.markdown("---")
         st.subheader("🔒 Acesso ao Sistema")
         
         with st.form("login_form"):
             user_input = st.text_input("Usuário")
             pass_input = st.text_input("Senha", type="password")
-            btn_login = st.form_submit_button("Entrar")
+            btn_login = st.form_submit_button("Entrar no Sistema")
 
             if btn_login:
-                if user_input in USUARIOS and USUARIOS[user_input]["senha"] == pass_input:
+                users = st.session_state["usuarios_db"]
+                if user_input in users and users[user_input]["senha"] == pass_input:
                     st.session_state["autenticado"] = True
-                    st.session_state["usuario_nome"] = USUARIOS[user_input]["nome"]
-                    st.session_state["usuario_role"] = USUARIOS[user_input]["role"]
+                    st.session_state["usuario_nome"] = users[user_input]["nome"]
+                    st.session_state["usuario_role"] = users[user_input]["role"]
                     st.rerun()
                 else:
                     st.error("Usuário ou senha incorretos.")
     st.stop()
 
-# --- CABEÇALHO E BRASÃO DA OCDS (REQUISITO 6) ---
-def render_header():
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=100)
-    with col2:
-        st.markdown("<h2 style='margin-bottom: 0px;'>Ordem dos Carmelitas Descalços Seculares</h2>", unsafe_allow_html=True)
-        st.markdown("<h4 style='color: #666; margin-top: 0px;'>Província São José</h4>", unsafe_allow_html=True)
-    st.divider()
-
+# --- INTERFACE PRINCIPAL ---
 render_header()
 
 user_role = st.session_state["usuario_role"]
 user_name = st.session_state["usuario_nome"]
 
-# Menu lateral
-st.sidebar.write(f"👤 **Usuário:** {user_name}")
+# Menu Lateral com Ícones
+st.sidebar.markdown(f"👤 **Usuário:** {user_name}")
 st.sidebar.caption(f"Perfil: {user_role.upper()}")
 
 if st.sidebar.button("🚪 Sair / Logout"):
@@ -173,18 +202,32 @@ if st.sidebar.button("🚪 Sair / Logout"):
 
 st.sidebar.divider()
 
+# Requisito 1 & 2: Opções de menu visíveis na sidebar por perfil
 if user_role == "adm":
-    opcoes_menu = ["Listar Membros", "Cadastrar Novo", "Editar / Afastamentos / Excluir", "Relatórios"]
+    opcoes_menu = [
+        "📋 Listar Membros",
+        "➕ Cadastrar Novo",
+        "✏️ Editar / Afastamentos / Excluir",
+        "📊 Relatórios e Estatísticas",
+        "🔐 Gestão de Senhas"
+    ]
 elif user_role == "inclusao":
-    opcoes_menu = ["Listar Membros", "Cadastrar Novo", "Relatórios"]
-else:
-    opcoes_menu = ["Listar Membros", "Relatórios"]
+    opcoes_menu = [
+        "📋 Listar Membros",
+        "➕ Cadastrar Novo",
+        "📊 Relatórios e Estatísticas"
+    ]
+else: # visualização
+    opcoes_menu = [
+        "📋 Listar Membros",
+        "📊 Relatórios e Estatísticas"
+    ]
 
-menu = st.sidebar.selectbox("Navegação", opcoes_menu)
+menu = st.sidebar.radio("📌 Navegação", opcoes_menu)
 db = get_db()
 
 # --- OPÇÃO 1: LISTAR ---
-if menu == "Listar Membros":
+if menu == "📋 Listar Membros":
     st.subheader("📋 Membros Cadastrados")
     membros = db.query(Membro).all()
     if membros:
@@ -206,7 +249,7 @@ if menu == "Listar Membros":
         st.info("Nenhum membro cadastrado ainda.")
 
 # --- OPÇÃO 2: CADASTRAR ---
-elif menu == "Cadastrar Novo":
+elif menu == "➕ Cadastrar Novo":
     st.subheader("➕ Cadastrar Novo Membro")
     with st.form("form_cadastro"):
         st.markdown("### 1. Dados Pessoais")
@@ -264,7 +307,7 @@ elif menu == "Cadastrar Novo":
                 st.success(f"Membro '{nome}' cadastrado com sucesso!")
 
 # --- OPÇÃO 3: EDITAR / AFASTAMENTOS / EXCLUIR ---
-elif menu == "Editar / Afastamentos / Excluir":
+elif menu == "✏️ Editar / Afastamentos / Excluir":
     st.subheader("✏️ Edição e Registro de Afastamentos")
     membros = db.query(Membro).all()
     if not membros:
@@ -385,13 +428,13 @@ elif menu == "Editar / Afastamentos / Excluir":
                     st.success("Afastamento registrado!")
                     st.rerun()
 
-# --- OPÇÃO 4: RELATÓRIOS ---
-elif menu == "Relatórios":
+# --- OPÇÃO 4: RELATÓRIOS (REQUISITO 3: FILTRO POR REGIONAL E COMUNIDADE) ---
+elif menu == "📊 Relatórios e Estatísticas":
     st.subheader("📊 Relatórios e Indicadores OCDS")
     
     tipo_relatorio = st.radio("Selecione o tipo de relatório:", [
         "Relatório Individual do Membro", 
-        "Relatório Numérico/Estatístico (Comunidade e Geral)"
+        "Relatório Numérico/Estatístico (Por Regional, Comunidade e Geral)"
     ])
 
     membros = db.query(Membro).all()
@@ -436,13 +479,26 @@ elif menu == "Relatórios":
     else:
         st.markdown("### 📈 Resumo Estatístico da Caminhada")
         
-        comunidades = list(set([m.comunidade for m in membros if m.comunidade]))
-        comunidades.insert(0, "Todas (Geral)")
-        filtro_com = st.selectbox("Filtrar por Comunidade:", comunidades)
+        col_f1, col_f2 = st.columns(2)
+        
+        # Filtro por Regional
+        with col_f1:
+            regionais = list(set([m.regional for m in membros if m.regional]))
+            regionais.insert(0, "Todas as Regionais")
+            filtro_reg = st.selectbox("Filtrar por Regional:", regionais)
 
+        # Filtro por Comunidade
+        with col_f2:
+            comunidades = list(set([m.comunidade for m in membros if m.comunidade]))
+            comunidades.insert(0, "Todas as Comunidades")
+            filtro_com = st.selectbox("Filtrar por Comunidade:", comunidades)
+
+        # Aplicação dos Filtros
         membros_filtrados = membros
-        if filtro_com != "Todas (Geral)":
-            membros_filtrados = [m for m in membros if m.comunidade == filtro_com]
+        if filtro_reg != "Todas as Regionais":
+            membros_filtrados = [m for m in membros_filtrados if m.regional == filtro_reg]
+        if filtro_com != "Todas as Comunidades":
+            membros_filtrados = [m for m in membros_filtrados if m.comunidade == filtro_com]
 
         tot_admissao = sum(1 for m in membros_filtrados if m.data_admissao and m.data_admissao.strip() != "")
         tot_temp = sum(1 for m in membros_filtrados if m.data_promessas_temp and m.data_promessas_temp.strip() != "")
@@ -456,11 +512,12 @@ elif menu == "Relatórios":
         k4.metric("Votos", tot_votos)
 
         st.markdown("---")
-        st.markdown("#### Lista de Membros no Filtro")
+        st.markdown(f"#### Lista de Membros ({len(membros_filtrados)} encontrados)")
         dados_resumo = []
         for m in membros_filtrados:
             dados_resumo.append({
                 "Nome": m.nome,
+                "Regional": m.regional or "-",
                 "Comunidade": m.comunidade or "-",
                 "Admissão": "Sim" if m.data_admissao else "Não",
                 "Promessas Temp.": "Sim" if m.data_promessas_temp else "Não",
@@ -468,5 +525,27 @@ elif menu == "Relatórios":
                 "Votos": "Sim" if m.data_votos else "Não"
             })
         st.dataframe(dados_resumo, use_container_width=True)
+
+# --- OPÇÃO 5: GESTÃO DE SENHAS (EXCLUSIVO PARA ADMINISTRADOR - REQUISITO 2) ---
+elif menu == "🔐 Gestão de Senhas" and user_role == "adm":
+    st.subheader("🔐 Alteração e Gerenciamento de Senhas")
+    st.info("Como Administrador, você pode alterar a senha dos perfis do sistema nesta aba.")
+
+    users = st.session_state["usuarios_db"]
+    usuario_alvo = st.selectbox("Selecione o usuário:", list(users.keys()), format_func=lambda u: f"{u} ({users[u]['nome']})")
+
+    with st.form("form_senha"):
+        nova_senha = st.text_input("Nova Senha", type="password")
+        confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
+        btn_mudar_senha = st.form_submit_button("Atualizar Senha")
+
+        if btn_mudar_senha:
+            if not nova_senha:
+                st.error("A senha não pode estar em branco.")
+            elif nova_senha != confirma_senha:
+                st.error("As senhas digitadas não coincidem.")
+            else:
+                st.session_state["usuarios_db"][usuario_alvo]["senha"] = nova_senha
+                st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
 
 db.close()
