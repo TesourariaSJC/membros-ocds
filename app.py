@@ -104,7 +104,7 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- USUÁRIOS DO SISTEMA ---
+# --- USUÁRIOS E SEGURANÇA ---
 if "usuarios_db" not in st.session_state:
     st.session_state["usuarios_db"] = {
         "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
@@ -119,7 +119,7 @@ if "usuario_nome" not in st.session_state:
 if "usuario_role" not in st.session_state:
     st.session_state["usuario_role"] = ""
 
-# --- CABEÇALHO PERSONALIZADO OCDS ---
+# --- CABEÇALHO OCDS ---
 def render_header():
     st.markdown("""
         <style>
@@ -283,10 +283,9 @@ elif menu == "➕ Cadastrar Novo":
             if not nome:
                 st.error("O campo Nome Completo é obrigatório!")
             else:
-                # Verificação de duplicados
                 existente = db.query(Membro).filter(func.lower(Membro.nome) == nome.strip().lower()).first()
                 if existente:
-                    st.warning(f"⚠️ O membro '{nome}' já possui cadastro no banco (ID #{existente.id}).")
+                    st.warning(f"⚠️ O membro '{nome}' já possui cadastro no banco (ID #{existente.id}). Utilize a aba de Edição para alterar os dados.")
                 else:
                     novo_membro = Membro(
                         nome=nome.strip(), nome_religioso=nome_religioso, data_nascimento=data_nascimento,
@@ -520,9 +519,9 @@ elif menu == "📊 Relatórios e Estatísticas":
 
 # --- OPÇÃO 5: GESTÃO E MANUTENÇÃO (ADM) ---
 elif menu == "🔐 Gestão e Manutenção" and user_role == "adm":
-    st.subheader("🔐 Gestão de Senhas e Manutenção da Base")
+    st.subheader("🔐 Gestão de Senhas e Consolidador Inteligente")
     
-    tab_senha, tab_limpeza = st.tabs(["Alteração de Senhas", "🧹 Limpeza de Membros Duplicados"])
+    tab_senha, tab_limpeza = st.tabs(["Alteração de Senhas", "🧩 Mesclagem e Consolidação de Dados"])
 
     with tab_senha:
         st.markdown("#### Alteração de Senhas dos Usuários")
@@ -544,31 +543,51 @@ elif menu == "🔐 Gestão e Manutenção" and user_role == "adm":
                     st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
 
     with tab_limpeza:
-        st.markdown("#### Remover Registros Duplicados no Banco")
-        st.warning("Esta ferramenta busca por membros que possuem o mesmo Nome Completo e mantém apenas o primeiro registro (ID mais antigo), excluindo os duplicados.")
+        st.markdown("#### Consolidar e Unificar Fichas Duplicadas")
+        st.info("Esta função analisa os cadastros com o mesmo nome e junta (mescla) **todas as informações preenchidas** de cada uma das cópias em uma única ficha completa antes de remover as duplicatas.")
         
         membros_todos = db.query(Membro).order_by(Membro.id).all()
-        nomes_vistos = set()
-        duplicados_ids = []
+        grupos_duplicados = {}
 
         for m in membros_todos:
-            nome_chave = m.nome.strip().lower()
-            if nome_chave in nomes_vistos:
-                duplicados_ids.append(m.id)
-            else:
-                nomes_vistos.add(nome_chave)
+            chave = m.nome.strip().lower()
+            if chave not in grupos_duplicados:
+                grupos_duplicados[chave] = []
+            grupos_duplicados[chave].append(m)
 
-        if duplicados_ids:
-            st.error(f"Foram encontrados **{len(duplicados_ids)} registro(s) duplicado(s)** no banco de dados.")
-            if st.button("🧹 Limpar Duplicados Agora", type="primary"):
-                for d_id in duplicados_ids:
-                    obj_dup = db.query(Membro).filter(Membro.id == d_id).first()
-                    if obj_dup:
-                        db.delete(obj_dup)
+        duplicados_encontrados = {k: v for k, v in grupos_duplicados.items() if len(v) > 1}
+
+        if duplicados_encontrados:
+            st.warning(f"Encontrados **{len(duplicados_encontrados)} membro(s)** com registros duplicados no banco.")
+            
+            if st.button("🔄 Consolidar e Mesclar Fichas Sem Perder Dados", type="primary"):
+                colunas_para_mesclar = [
+                    'nome_religioso', 'data_nascimento', 'rg', 'cpf', 'estado_civil',
+                    'conjuge', 'endereco', 'bairro', 'cidade', 'comunidade', 'regional',
+                    'data_entrada', 'data_admissao', 'quem_realizou_admissao',
+                    'data_promessas_temp', 'quem_realizou_promessas_temp',
+                    'data_promessas_def', 'quem_realizou_promessas_def',
+                    'data_votos', 'quem_realizou_votos', 'data_sanatio'
+                ]
+
+                for chave, lista_membros in duplicados_encontrados.items():
+                    m_principal = lista_membros[0]
+                    for m_duplicado in lista_membros[1:]:
+                        for col in colunas_para_mesclar:
+                            v_p = getattr(m_principal, col)
+                            v_d = getattr(m_duplicado, col)
+                            if (not v_p or str(v_p).strip() == "" or str(v_p) == "-") and v_d and str(v_d).strip() != "":
+                                setattr(m_principal, col, v_d)
+                        
+                        for af in m_duplicado.afastamentos:
+                            af.membro_id = m_principal.id
+                        
+                        db.delete(m_duplicado)
+
                 db.commit()
-                st.success("Limpeza concluída com sucesso! Todos os registros duplicados foram removidos.")
+                st.success("✅ Fichas consolidadas com sucesso! Todas as informações foram unificadas na ficha principal.")
                 st.rerun()
         else:
-            st.success("✅ A base de dados está limpa! Nenhum registro duplicado encontrado.")
+            st.success("✅ Todas as fichas estão consolidadas e sem duplicidades!")
 
 db.close()
