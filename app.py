@@ -1,15 +1,17 @@
 import os
-import base64
+import io
+import urllib.request
 import streamlit as st
+import streamlit.components.v1 as components
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
-# Tenta importar WeasyPrint para geração de relatórios A4 em PDF
-try:
-    from weasyprint import HTML
-    HAS_WEASYPRINT = True
-except ImportError:
-    HAS_WEASYPRINT = False
+# ReportLab para geração de PDF A4 em Python puro
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
 
 # Configuração da página
 st.set_page_config(page_title="Gestão de Membros OCDS", layout="wide", page_icon="📜")
@@ -112,8 +114,17 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- URL DO BRASÃO OFICIAL OCDS ---
+# --- URL E CACHE DO BRASÃO DA OCDS ---
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
+
+@st.cache_data
+def get_logo_bytes():
+    try:
+        req = urllib.request.Request(LOGO_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response:
+            return response.read()
+    except Exception:
+        return None
 
 # --- USUÁRIOS DO SISTEMA ---
 if "usuarios_db" not in st.session_state:
@@ -161,6 +172,156 @@ def render_header():
         st.markdown('<div class="header-title">Ordem dos Carmelitas Descalços Seculares</div>', unsafe_allow_html=True)
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
     st.divider()
+
+# --- GERADOR DE PDF A4 VIA REPORTLAB ---
+def gerar_pdf_membro_a4(m):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    # Estilos customizados
+    title_style = ParagraphStyle(
+        'HeaderTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=16,
+        leading=20,
+        textColor=colors.HexColor("#4A2C11"),
+        alignment=1
+    )
+    subtitle_style = ParagraphStyle(
+        'HeaderSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#7A4B1E"),
+        alignment=1
+    )
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#FFFFFF"),
+        backColor=colors.HexColor("#4A2C11"),
+        spaceBefore=10,
+        spaceAfter=5,
+        borderPadding=4
+    )
+    text_bold = ParagraphStyle('BoldText', fontName='Helvetica-Bold', fontSize=9, leading=12, textColor=colors.HexColor("#4A2C11"))
+    text_normal = ParagraphStyle('NormText', fontName='Helvetica', fontSize=9, leading=12, textColor=colors.HexColor("#222222"))
+
+    story = []
+
+    # Logo
+    logo_bytes = get_logo_bytes()
+    if logo_bytes:
+        img_buffer = io.BytesIO(logo_bytes)
+        img = RLImage(img_buffer, width=2.2*cm, height=2.2*cm)
+        img.hAlign = 'CENTER'
+        story.append(img)
+        story.append(Spacer(1, 0.2*cm))
+
+    story.append(Paragraph("Ordem dos Carmelitas Descalços Seculares", title_style))
+    story.append(Paragraph("Província São José — Ficha Cadastral do Membro", subtitle_style))
+    story.append(Spacer(1, 0.4*cm))
+
+    # Tabela auxiliar para par de chave-valor
+    def make_cell(label, value):
+        return [
+            Paragraph(label, text_bold),
+            Paragraph(str(value) if value else "-", text_normal)
+        ]
+
+    # Secao 1: Dados Pessoais
+    story.append(Paragraph("1. DADOS PESSOAIS", section_style))
+    data_pessoais = [
+        [Paragraph("<b>Nome Completo:</b>", text_bold), Paragraph(m.nome or "-", text_normal), Paragraph("<b>Nome Religioso:</b>", text_bold), Paragraph(m.nome_religioso or "-", text_normal)],
+        [Paragraph("<b>Data Nasc.:</b>", text_bold), Paragraph(m.data_nascimento or "-", text_normal), Paragraph("<b>Estado Civil:</b>", text_bold), Paragraph(m.estado_civil or "-", text_normal)],
+        [Paragraph("<b>RG:</b>", text_bold), Paragraph(m.rg or "-", text_normal), Paragraph("<b>CPF:</b>", text_bold), Paragraph(m.cpf or "-", text_normal)],
+        [Paragraph("<b>Cônjuge:</b>", text_bold), Paragraph(m.conjuge or "-", text_normal), Paragraph("<b>Cidade:</b>", text_bold), Paragraph(f"{m.cidade or '-'} / {m.bairro or '-'}", text_normal)],
+        [Paragraph("<b>Endereço:</b>", text_bold), Paragraph(m.endereco or "-", text_normal), Paragraph("", text_normal), Paragraph("", text_normal)]
+    ]
+    t1 = Table(data_pessoais, colWidths=[3*cm, 6*cm, 3*cm, 6*cm])
+    t1.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF8F5")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t1)
+
+    # Secao 2: Vinculacao
+    story.append(Paragraph("2. VINCULAÇÃO E COMUNIDADE", section_style))
+    data_vinc = [
+        [Paragraph("<b>Regional:</b>", text_bold), Paragraph(m.regional or "-", text_normal)],
+        [Paragraph("<b>Comunidade:</b>", text_bold), Paragraph(m.comunidade or "-", text_normal)]
+    ]
+    t2 = Table(data_vinc, colWidths=[4*cm, 14*cm])
+    t2.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF8F5")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t2)
+
+    # Secao 3: Caminhada OCDS
+    story.append(Paragraph("3. CAMINHADA E ETAPAS OCDS", section_style))
+    data_ocds = [
+        [Paragraph("<b>Data de Entrada:</b>", text_bold), Paragraph(m.data_entrada or "-", text_normal), Paragraph("<b>Sanatio:</b>", text_bold), Paragraph(m.data_sanatio or "-", text_normal)],
+        [Paragraph("<b>Admissão:</b>", text_bold), Paragraph(m.data_admissao or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_admissao or "-", text_normal)],
+        [Paragraph("<b>Promessas Temp.:</b>", text_bold), Paragraph(m.data_promessas_temp or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_temp or "-", text_normal)],
+        [Paragraph("<b>Promessas Def.:</b>", text_bold), Paragraph(m.data_promessas_def or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_def or "-", text_normal)],
+        [Paragraph("<b>Votos:</b>", text_bold), Paragraph(m.data_votos or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_votos or "-", text_normal)]
+    ]
+    t3 = Table(data_ocds, colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 5.5*cm])
+    t3.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF8F5")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t3)
+
+    # Secao 4: Afastamentos
+    story.append(Paragraph("4. HISTÓRICO DE AFASTAMENTOS", section_style))
+    if m.afastamentos:
+        data_af = [[Paragraph("<b>Data Afastamento</b>", text_bold), Paragraph("<b>Data Retorno</b>", text_bold), Paragraph("<b>Motivo</b>", text_bold)]]
+        for af in m.afastamentos:
+            data_af.append([
+                Paragraph(af.data_afastamento or "-", text_normal),
+                Paragraph(af.data_retorno or "Em afastamento", text_normal),
+                Paragraph(af.motivo or "-", text_normal)
+            ])
+        t4 = Table(data_af, colWidths=[4*cm, 4*cm, 10*cm])
+        t4.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EFE8E1")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ]))
+        story.append(t4)
+    else:
+        story.append(Paragraph("Nenhum afastamento registrado para este membro.", text_normal))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # --- TELA DE LOGIN ---
 if not st.session_state["autenticado"]:
@@ -455,169 +616,21 @@ elif menu == "📊 Relatórios e Estatísticas":
             m_id = opcoes[st.selectbox("Escolha o Membro:", list(opcoes.keys()))]
             m = db.query(Membro).filter(Membro.id == m_id).first()
 
-            col_a, col_b = st.columns([4, 1])
+            col_a, col_b = st.columns([3, 1])
             with col_a:
                 st.markdown(f"### 📄 Ficha Cadastral: {m.nome}")
             
-            # --- GERADOR DE RELATÓRIO A4 EM HTML/PDF ---
-            html_a4 = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    @page {{
-                        size: A4;
-                        margin: 15mm 15mm 15mm 15mm;
-                    }}
-                    body {{
-                        font-family: 'Georgia', 'Times New Roman', serif;
-                        color: #2b1a0e;
-                        line-height: 1.4;
-                        margin: 0;
-                    }}
-                    .header {{
-                        text-align: center;
-                        border-bottom: 2px solid #4A2C11;
-                        padding-bottom: 10px;
-                        margin-bottom: 15px;
-                    }}
-                    .logo {{
-                        width: 80px;
-                        height: auto;
-                    }}
-                    .title {{
-                        font-size: 18pt;
-                        font-weight: bold;
-                        color: #4A2C11;
-                        margin-top: 5px;
-                    }}
-                    .subtitle {{
-                        font-size: 12pt;
-                        color: #7A4B1E;
-                        font-style: italic;
-                    }}
-                    .section-title {{
-                        font-size: 12pt;
-                        font-weight: bold;
-                        background-color: #f5efe9;
-                        color: #4A2C11;
-                        padding: 4px 8px;
-                        margin-top: 15px;
-                        margin-bottom: 8px;
-                        border-left: 4px solid #4A2C11;
-                    }}
-                    table {{
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-bottom: 10px;
-                    }}
-                    td {{
-                        padding: 4px 6px;
-                        font-size: 10pt;
-                        vertical-align: top;
-                    }}
-                    .label {{
-                        font-weight: bold;
-                        color: #4A2C11;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <img src="{LOGO_URL}" class="logo"><br>
-                    <div class="title">Ordem dos Carmelitas Descalços Seculares</div>
-                    <div class="subtitle">Província São José - Ficha Cadastral do Membro</div>
-                </div>
-
-                <div class="section-title">1. Dados Pessoais</div>
-                <table>
-                    <tr>
-                        <td width="50%"><span class="label">Nome Completo:</span> {m.nome or '-'}</td>
-                        <td width="50%"><span class="label">Nome Religioso:</span> {m.nome_religioso or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">Data Nasc.:</span> {m.data_nascimento or '-'}</td>
-                        <td><span class="label">Estado Civil:</span> {m.estado_civil or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">RG:</span> {m.rg or '-'}</td>
-                        <td><span class="label">CPF:</span> {m.cpf or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td colspan="2"><span class="label">Cônjuge:</span> {m.conjuge or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td colspan="2"><span class="label">Endereço:</span> {m.endereco or '-'}, {m.bairro or '-'}, {m.cidade or '-'}</td>
-                    </tr>
-                </table>
-
-                <div class="section-title">2. Vinculação OCDS</div>
-                <table>
-                    <tr>
-                        <td width="50%"><span class="label">Regional:</span> {m.regional or '-'}</td>
-                        <td width="50%"><span class="label">Comunidade:</span> {m.comunidade or '-'}</td>
-                    </tr>
-                </table>
-
-                <div class="section-title">3. Caminhada OCDS</div>
-                <table>
-                    <tr>
-                        <td width="50%"><span class="label">Data de Entrada:</span> {m.data_entrada or '-'}</td>
-                        <td width="50%"><span class="label">Data de Sanatio:</span> {m.data_sanatio or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">Admissão:</span> {m.data_admissao or '-'}</td>
-                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_admissao or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">Promessas Temporárias:</span> {m.data_promessas_temp or '-'}</td>
-                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_promessas_temp or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">Promessas Definitivas:</span> {m.data_promessas_def or '-'}</td>
-                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_promessas_def or '-'}</td>
-                    </tr>
-                    <tr>
-                        <td><span class="label">Votos:</span> {m.data_votos or '-'}</td>
-                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_votos or '-'}</td>
-                    </tr>
-                </table>
-
-                <div class="section-title">4. Histórico de Afastamentos</div>
-            """
-            
-            if m.afastamentos:
-                html_a4 += "<table><tr style='font-weight:bold;'><td>Afastamento</td><td>Retorno</td><td>Motivo</td></tr>"
-                for af in m.afastamentos:
-                    html_a4 += f"<tr><td>{af.data_afastamento or '-'}</td><td>{af.data_retorno or 'Atual'}</td><td>{af.motivo or '-'}</td></tr>"
-                html_a4 += "</table>"
-            else:
-                html_a4 += "<p style='font-size:10pt;'>Nenhum afastamento registrado.</p>"
-
-            html_a4 += """
-            </body>
-            </html>
-            """
-
-            # Botão de Impressão A4
+            # Botão de Download PDF A4 via ReportLab
             with col_b:
-                if HAS_WEASYPRINT:
-                    pdf_bytes = HTML(string=html_a4).write_pdf()
-                    st.download_button(
-                        label="🖨️ Imprimir Ficha (A4 PDF)",
-                        data=pdf_bytes,
-                        file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.pdf",
-                        mime="application/pdf"
-                    )
-                else:
-                    st.download_button(
-                        label="🖨️ Baixar Ficha A4 (HTML)",
-                        data=html_a4,
-                        file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.html",
-                        mime="text/html"
-                    )
+                pdf_data = gerar_pdf_membro_a4(m)
+                st.download_button(
+                    label="🖨️ Baixar Ficha em PDF A4",
+                    data=pdf_data,
+                    file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
 
+            st.markdown("---")
             c1, c2 = st.columns(2)
             with c1:
                 st.write(f"**Nome Religioso:** {m.nome_religioso or '-'}")
