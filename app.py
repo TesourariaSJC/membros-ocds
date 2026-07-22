@@ -2,7 +2,6 @@ import os
 import io
 import urllib.request
 import streamlit as st
-import streamlit.components.v1 as components
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -15,6 +14,13 @@ from reportlab.lib.units import cm
 
 # Configuração da página
 st.set_page_config(page_title="Gestão de Membros OCDS", layout="wide", page_icon="📜")
+
+# Lista de UFs do Brasil
+UFS_BRASIL = [
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+    "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+    "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+]
 
 # --- BANCO DE DADOS ---
 db_url = None
@@ -50,10 +56,12 @@ try:
         endereco = Column(String(250))
         bairro = Column(String(150))
         cidade = Column(String(150))
+        uf = Column(String(10))
         comunidade = Column(String(150))
         regional = Column(String(150))
 
         data_entrada = Column(String(30))
+        data_erecao_canonica = Column(String(30))
         data_admissao = Column(String(30))
         quem_realizou_admissao = Column(String(200))
         data_promessas_temp = Column(String(30))
@@ -84,7 +92,9 @@ try:
             novas_colunas = {
                 "comunidade": "VARCHAR(150)",
                 "regional": "VARCHAR(150)",
+                "uf": "VARCHAR(10)",
                 "data_entrada": "VARCHAR(30)",
+                "data_erecao_canonica": "VARCHAR(30)",
                 "data_admissao": "VARCHAR(30)",
                 "quem_realizou_admissao": "VARCHAR(200)",
                 "data_promessas_temp": "VARCHAR(30)",
@@ -173,7 +183,7 @@ def render_header():
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
     st.divider()
 
-# --- GERADOR DE PDF A4 VIA REPORTLAB ---
+# --- GERADOR DE PDF A4 INDIVIDUAL VIA REPORTLAB ---
 def gerar_pdf_membro_a4(m):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -187,7 +197,6 @@ def gerar_pdf_membro_a4(m):
     
     styles = getSampleStyleSheet()
     
-    # Estilos customizados
     title_style = ParagraphStyle(
         'HeaderTitle',
         parent=styles['Heading1'],
@@ -223,7 +232,6 @@ def gerar_pdf_membro_a4(m):
 
     story = []
 
-    # Logo
     logo_bytes = get_logo_bytes()
     if logo_bytes:
         img_buffer = io.BytesIO(logo_bytes)
@@ -236,20 +244,12 @@ def gerar_pdf_membro_a4(m):
     story.append(Paragraph("Província São José — Ficha Cadastral do Membro", subtitle_style))
     story.append(Spacer(1, 0.4*cm))
 
-    # Tabela auxiliar para par de chave-valor
-    def make_cell(label, value):
-        return [
-            Paragraph(label, text_bold),
-            Paragraph(str(value) if value else "-", text_normal)
-        ]
-
-    # Secao 1: Dados Pessoais
     story.append(Paragraph("1. DADOS PESSOAIS", section_style))
     data_pessoais = [
         [Paragraph("<b>Nome Completo:</b>", text_bold), Paragraph(m.nome or "-", text_normal), Paragraph("<b>Nome Religioso:</b>", text_bold), Paragraph(m.nome_religioso or "-", text_normal)],
         [Paragraph("<b>Data Nasc.:</b>", text_bold), Paragraph(m.data_nascimento or "-", text_normal), Paragraph("<b>Estado Civil:</b>", text_bold), Paragraph(m.estado_civil or "-", text_normal)],
         [Paragraph("<b>RG:</b>", text_bold), Paragraph(m.rg or "-", text_normal), Paragraph("<b>CPF:</b>", text_bold), Paragraph(m.cpf or "-", text_normal)],
-        [Paragraph("<b>Cônjuge:</b>", text_bold), Paragraph(m.conjuge or "-", text_normal), Paragraph("<b>Cidade:</b>", text_bold), Paragraph(f"{m.cidade or '-'} / {m.bairro or '-'}", text_normal)],
+        [Paragraph("<b>Cônjuge:</b>", text_bold), Paragraph(m.conjuge or "-", text_normal), Paragraph("<b>Cidade/UF:</b>", text_bold), Paragraph(f"{m.cidade or '-'} / {m.uf or '-'} ({m.bairro or '-'})", text_normal)],
         [Paragraph("<b>Endereço:</b>", text_bold), Paragraph(m.endereco or "-", text_normal), Paragraph("", text_normal), Paragraph("", text_normal)]
     ]
     t1 = Table(data_pessoais, colWidths=[3*cm, 6*cm, 3*cm, 6*cm])
@@ -262,7 +262,6 @@ def gerar_pdf_membro_a4(m):
     ]))
     story.append(t1)
 
-    # Secao 2: Vinculacao
     story.append(Paragraph("2. VINCULAÇÃO E COMUNIDADE", section_style))
     data_vinc = [
         [Paragraph("<b>Regional:</b>", text_bold), Paragraph(m.regional or "-", text_normal)],
@@ -278,14 +277,14 @@ def gerar_pdf_membro_a4(m):
     ]))
     story.append(t2)
 
-    # Secao 3: Caminhada OCDS
     story.append(Paragraph("3. CAMINHADA E ETAPAS OCDS", section_style))
     data_ocds = [
-        [Paragraph("<b>Data de Entrada:</b>", text_bold), Paragraph(m.data_entrada or "-", text_normal), Paragraph("<b>Sanatio:</b>", text_bold), Paragraph(m.data_sanatio or "-", text_normal)],
+        [Paragraph("<b>Data de Entrada:</b>", text_bold), Paragraph(m.data_entrada or "-", text_normal), Paragraph("<b>Ereção Canônica:</b>", text_bold), Paragraph(m.data_erecao_canonica or "-", text_normal)],
         [Paragraph("<b>Admissão:</b>", text_bold), Paragraph(m.data_admissao or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_admissao or "-", text_normal)],
         [Paragraph("<b>Promessas Temp.:</b>", text_bold), Paragraph(m.data_promessas_temp or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_temp or "-", text_normal)],
         [Paragraph("<b>Promessas Def.:</b>", text_bold), Paragraph(m.data_promessas_def or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_def or "-", text_normal)],
-        [Paragraph("<b>Votos:</b>", text_bold), Paragraph(m.data_votos or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_votos or "-", text_normal)]
+        [Paragraph("<b>Votos:</b>", text_bold), Paragraph(m.data_votos or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_votos or "-", text_normal)],
+        [Paragraph("<b>Sanatio:</b>", text_bold), Paragraph(m.data_sanatio or "-", text_normal), Paragraph("", text_normal), Paragraph("", text_normal)]
     ]
     t3 = Table(data_ocds, colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 5.5*cm])
     t3.setStyle(TableStyle([
@@ -297,7 +296,6 @@ def gerar_pdf_membro_a4(m):
     ]))
     story.append(t3)
 
-    # Secao 4: Afastamentos
     story.append(Paragraph("4. HISTÓRICO DE AFASTAMENTOS", section_style))
     if m.afastamentos:
         data_af = [[Paragraph("<b>Data Afastamento</b>", text_bold), Paragraph("<b>Data Retorno</b>", text_bold), Paragraph("<b>Motivo</b>", text_bold)]]
@@ -318,6 +316,140 @@ def gerar_pdf_membro_a4(m):
         story.append(t4)
     else:
         story.append(Paragraph("Nenhum afastamento registrado para este membro.", text_normal))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+# --- GERADOR DE PDF A4 RESUMO ESTATÍSTICO VIA REPORTLAB ---
+def gerar_pdf_resumo_a4(membros_filtrados, filtro_reg, filtro_com, tot_admissao, tot_temp, tot_def, tot_votos):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.5*cm,
+        leftMargin=1.5*cm,
+        topMargin=1.5*cm,
+        bottomMargin=1.5*cm
+    )
+    
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'HeaderTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=15,
+        leading=18,
+        textColor=colors.HexColor("#4A2C11"),
+        alignment=1
+    )
+    subtitle_style = ParagraphStyle(
+        'HeaderSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#7A4B1E"),
+        alignment=1
+    )
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=10,
+        leading=13,
+        textColor=colors.HexColor("#FFFFFF"),
+        backColor=colors.HexColor("#4A2C11"),
+        spaceBefore=8,
+        spaceAfter=4,
+        borderPadding=3
+    )
+    text_bold = ParagraphStyle('BoldText', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.HexColor("#4A2C11"))
+    text_normal = ParagraphStyle('NormText', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.HexColor("#222222"))
+    metric_label = ParagraphStyle('MetLabel', fontName='Helvetica-Bold', fontSize=9, leading=11, textColor=colors.HexColor("#4A2C11"), alignment=1)
+    metric_value = ParagraphStyle('MetValue', fontName='Helvetica-Bold', fontSize=14, leading=16, textColor=colors.HexColor("#7A4B1E"), alignment=1)
+
+    story = []
+
+    logo_bytes = get_logo_bytes()
+    if logo_bytes:
+        img_buffer = io.BytesIO(logo_bytes)
+        img = RLImage(img_buffer, width=2.0*cm, height=2.0*cm)
+        img.hAlign = 'CENTER'
+        story.append(img)
+        story.append(Spacer(1, 0.1*cm))
+
+    story.append(Paragraph("Ordem dos Carmelitas Descalços Seculares", title_style))
+    story.append(Paragraph("Província São José — Relatório Estatístico da Caminhada", subtitle_style))
+    story.append(Spacer(1, 0.3*cm))
+
+    # Filtros Aplicados
+    info_filtros = [
+        [Paragraph("<b>Regional Filtrada:</b>", text_bold), Paragraph(str(filtro_reg), text_normal), Paragraph("<b>Comunidade Filtrada:</b>", text_bold), Paragraph(str(filtro_com), text_normal)]
+    ]
+    t_filt = Table(info_filtros, colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 5.5*cm])
+    t_filt.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F5EFE9")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#D1C2B2")),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t_filt)
+    story.append(Spacer(1, 0.2*cm))
+
+    # Tabela de Metricas Quantitativas
+    story.append(Paragraph("1. SOMA QUANTITATIVA DAS ETAPAS", section_style))
+    metrics_data = [
+        [Paragraph("Admissões", metric_label), Paragraph("Promessas Temporárias", metric_label), Paragraph("Promessas Definitivas", metric_label), Paragraph("Votos", metric_label)],
+        [Paragraph(str(tot_admissao), metric_value), Paragraph(str(tot_temp), metric_value), Paragraph(str(tot_def), metric_value), Paragraph(str(tot_votos), metric_value)]
+    ]
+    t_met = Table(metrics_data, colWidths=[4.5*cm, 4.5*cm, 4.5*cm, 4.5*cm])
+    t_met.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF8F5")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+    ]))
+    story.append(t_met)
+    story.append(Spacer(1, 0.2*cm))
+
+    # Lista de Membros
+    story.append(Paragraph(f"2. LISTAGEM DOS MEMBROS ({len(membros_filtrados)} Registros)", section_style))
+    
+    headers = [
+        Paragraph("<b>Nome</b>", text_bold),
+        Paragraph("<b>Regional</b>", text_bold),
+        Paragraph("<b>Comunidade</b>", text_bold),
+        Paragraph("<b>Adm.</b>", text_bold),
+        Paragraph("<b>Prom.Temp.</b>", text_bold),
+        Paragraph("<b>Prom.Def.</b>", text_bold),
+        Paragraph("<b>Votos</b>", text_bold)
+    ]
+    table_membros_data = [headers]
+
+    for m in membros_filtrados:
+        table_membros_data.append([
+            Paragraph(m.nome or "-", text_normal),
+            Paragraph(m.regional or "-", text_normal),
+            Paragraph(m.comunidade or "-", text_normal),
+            Paragraph("Sim" if m.data_admissao else "Não", text_normal),
+            Paragraph("Sim" if m.data_promessas_temp else "Não", text_normal),
+            Paragraph("Sim" if m.data_promessas_def else "Não", text_normal),
+            Paragraph("Sim" if m.data_votos else "Não", text_normal)
+        ])
+
+    t_membros = Table(table_membros_data, colWidths=[4.5*cm, 3.2*cm, 4.3*cm, 1.5*cm, 1.7*cm, 1.5*cm, 1.3*cm])
+    t_membros.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EFE8E1")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+    ]))
+    story.append(t_membros)
 
     doc.build(story)
     buffer.seek(0)
@@ -400,6 +532,7 @@ if menu == "📋 Listar Membros":
                 "ID": m.id,
                 "Nome": m.nome,
                 "Nome Religioso": m.nome_religioso or "-",
+                "UF": m.uf or "-",
                 "Comunidade": m.comunidade or "-",
                 "Regional": m.regional or "-",
                 "Admissão": m.data_admissao or "-",
@@ -429,6 +562,7 @@ elif menu == "➕ Cadastrar Novo":
             endereco = st.text_input("Endereço")
             bairro = st.text_input("Bairro")
             cidade = st.text_input("Cidade")
+            uf = st.selectbox("Unidade da Federação (UF)", UFS_BRASIL, index=24) # Default SP
             comunidade = st.text_input("Comunidade", value="Alegria da Sagrada Face Itapetininga")
             regional = st.selectbox("Regional", [
                 "1 - Regional São João da Cruz",
@@ -439,6 +573,7 @@ elif menu == "➕ Cadastrar Novo":
         col_ocds1, col_ocds2 = st.columns(2)
         with col_ocds1:
             data_entrada = st.text_input("Data de Entrada na OCDS")
+            data_erecao_canonica = st.text_input("Data da Ereção Canônica")
             data_admissao = st.text_input("Data da Admissão")
             quem_realizou_admissao = st.text_input("Quem realizou a Admissão")
             data_promessas_temp = st.text_input("Data das Promessas Temporárias")
@@ -462,10 +597,10 @@ elif menu == "➕ Cadastrar Novo":
                     novo_membro = Membro(
                         nome=nome.strip(), nome_religioso=nome_religioso, data_nascimento=data_nascimento,
                         rg=rg, cpf=cpf, estado_civil=estado_civil, conjuge=conjuge,
-                        endereco=endereco, bairro=bairro, cidade=cidade, comunidade=comunidade,
-                        regional=regional, data_entrada=data_entrada, data_admissao=data_admissao,
-                        quem_realizou_admissao=quem_realizou_admissao, data_promessas_temp=data_promessas_temp,
-                        quem_realizou_promessas_temp=quem_realizou_promessas_temp,
+                        endereco=endereco, bairro=bairro, cidade=cidade, uf=uf, comunidade=comunidade,
+                        regional=regional, data_entrada=data_entrada, data_erecao_canonica=data_erecao_canonica,
+                        data_admissao=data_admissao, quem_realizou_admissao=quem_realizou_admissao,
+                        data_promessas_temp=data_promessas_temp, quem_realizou_promessas_temp=quem_realizou_promessas_temp,
                         data_promessas_def=data_promessas_def, quem_realizou_promessas_def=quem_realizou_promessas_def,
                         data_votos=data_votos, quem_realizou_votos=quem_realizou_votos, data_sanatio=data_sanatio
                     )
@@ -504,6 +639,8 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                         endereco = st.text_input("Endereço", value=membro.endereco or "")
                         bairro = st.text_input("Bairro", value=membro.bairro or "")
                         cidade = st.text_input("Cidade", value=membro.cidade or "")
+                        uf_index = UFS_BRASIL.index(membro.uf) if membro.uf in UFS_BRASIL else 24
+                        uf = st.selectbox("Unidade da Federação (UF)", UFS_BRASIL, index=uf_index)
                         comunidade = st.text_input("Comunidade", value=membro.comunidade or "Alegria da Sagrada Face Itapetininga")
                         reg_index = 0 if "São João" in (membro.regional or "") else 1
                         regional = st.selectbox("Regional", [
@@ -515,6 +652,7 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                     co1, co2 = st.columns(2)
                     with co1:
                         data_entrada = st.text_input("Data de Entrada", value=membro.data_entrada or "")
+                        data_erecao_canonica = st.text_input("Data da Ereção Canônica", value=membro.data_erecao_canonica or "")
                         data_admissao = st.text_input("Data Admissão", value=membro.data_admissao or "")
                         quem_realizou_admissao = st.text_input("Quem realizou Admissão", value=membro.quem_realizou_admissao or "")
                         data_promessas_temp = st.text_input("Data Prom. Temp.", value=membro.data_promessas_temp or "")
@@ -539,9 +677,11 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                     membro.endereco = endereco
                     membro.bairro = bairro
                     membro.cidade = cidade
+                    membro.uf = uf
                     membro.comunidade = comunidade
                     membro.regional = regional
                     membro.data_entrada = data_entrada
+                    membro.data_erecao_canonica = data_erecao_canonica
                     membro.data_admissao = data_admissao
                     membro.quem_realizou_admissao = quem_realizou_admissao
                     membro.data_promessas_temp = data_promessas_temp
@@ -620,11 +760,10 @@ elif menu == "📊 Relatórios e Estatísticas":
             with col_a:
                 st.markdown(f"### 📄 Ficha Cadastral: {m.nome}")
             
-            # Botão de Download PDF A4 via ReportLab
             with col_b:
                 pdf_data = gerar_pdf_membro_a4(m)
                 st.download_button(
-                    label="🖨️ Baixar Ficha em PDF A4",
+                    label="🖨️ Imprimir Ficha A4 (PDF)",
                     data=pdf_data,
                     file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.pdf",
                     mime="application/pdf"
@@ -639,11 +778,12 @@ elif menu == "📊 Relatórios e Estatísticas":
                 st.write(f"**RG:** {m.rg or '-'}")
                 st.write(f"**Estado Civil:** {m.estado_civil or '-'}")
                 st.write(f"**Cônjuge:** {m.conjuge or '-'}")
-                st.write(f"**Endereço:** {m.endereco or '-'}, {m.bairro or '-'}, {m.cidade or '-'}")
+                st.write(f"**Endereço:** {m.endereco or '-'}, {m.bairro or '-'}, {m.cidade or '-'} / {m.uf or '-'}")
             with c2:
                 st.write(f"**Comunidade:** {m.comunidade or '-'}")
                 st.write(f"**Regional:** {m.regional or '-'}")
                 st.write(f"**Data de Entrada:** {m.data_entrada or '-'}")
+                st.write(f"**Ereção Canônica:** {m.data_erecao_canonica or '-'}")
                 st.write(f"**Admissão:** {m.data_admissao or '-'} (Por: {m.quem_realizou_admissao or '-'})")
                 st.write(f"**Promessas Temp.:** {m.data_promessas_temp or '-'} (Por: {m.quem_realizou_promessas_temp or '-'})")
                 st.write(f"**Promessas Def.:** {m.data_promessas_def or '-'} (Por: {m.quem_realizou_promessas_def or '-'})")
@@ -682,6 +822,21 @@ elif menu == "📊 Relatórios e Estatísticas":
         tot_def = sum(1 for m in membros_filtrados if m.data_promessas_def and m.data_promessas_def.strip() != "")
         tot_votos = sum(1 for m in membros_filtrados if m.data_votos and m.data_votos.strip() != "")
 
+        col_head, col_print = st.columns([3, 1])
+        with col_head:
+            st.markdown(f"**Métricas Atuais — {filtro_reg} | {filtro_com}**")
+        with col_print:
+            pdf_resumo_bytes = gerar_pdf_resumo_a4(
+                membros_filtrados, filtro_reg, filtro_com,
+                tot_admissao, tot_temp, tot_def, tot_votos
+            )
+            st.download_button(
+                label="🖨️ Imprimir Relatório A4 (PDF)",
+                data=pdf_resumo_bytes,
+                file_name=f"Relatorio_Estatistico_OCDS_{filtro_com.replace(' ', '_')}.pdf",
+                mime="application/pdf"
+            )
+
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Admissões", tot_admissao)
         k2.metric("Promessas Temporárias", tot_temp)
@@ -696,6 +851,7 @@ elif menu == "📊 Relatórios e Estatísticas":
                 "Nome": m.nome,
                 "Regional": m.regional or "-",
                 "Comunidade": m.comunidade or "-",
+                "UF": m.uf or "-",
                 "Admissão": "Sim" if m.data_admissao else "Não",
                 "Promessas Temp.": "Sim" if m.data_promessas_temp else "Não",
                 "Promessas Def.": "Sim" if m.data_promessas_def else "Não",
