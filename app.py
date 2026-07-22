@@ -1,10 +1,18 @@
 import os
+import base64
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+# Tenta importar WeasyPrint para geração de relatórios A4 em PDF
+try:
+    from weasyprint import HTML
+    HAS_WEASYPRINT = True
+except ImportError:
+    HAS_WEASYPRINT = False
+
 # Configuração da página
-st.set_page_config(page_title="Gestão de Membros OCDS", layout="wide")
+st.set_page_config(page_title="Gestão de Membros OCDS", layout="wide", page_icon="📜")
 
 # --- BANCO DE DADOS ---
 db_url = None
@@ -104,7 +112,10 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- USUÁRIOS E SEGURANÇA ---
+# --- URL DO BRASÃO OFICIAL OCDS ---
+LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
+
+# --- USUÁRIOS DO SISTEMA ---
 if "usuarios_db" not in st.session_state:
     st.session_state["usuarios_db"] = {
         "admin": {"senha": "admin123", "nome": "Administrador", "role": "adm"},
@@ -119,7 +130,7 @@ if "usuario_nome" not in st.session_state:
 if "usuario_role" not in st.session_state:
     st.session_state["usuario_role"] = ""
 
-# --- CABEÇALHO OCDS ---
+# --- CABEÇALHO PERSONALIZADO OCDS ---
 def render_header():
     st.markdown("""
         <style>
@@ -145,7 +156,7 @@ def render_header():
     
     col1, col2 = st.columns([1, 5])
     with col1:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=115)
+        st.image(LOGO_URL, width=115)
     with col2:
         st.markdown('<div class="header-title">Ordem dos Carmelitas Descalços Seculares</div>', unsafe_allow_html=True)
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
@@ -155,7 +166,7 @@ def render_header():
 if not st.session_state["autenticado"]:
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png", width=120)
+        st.image(LOGO_URL, width=120)
         st.markdown("<h3 style='color: #4A2C11; font-family: serif; text-align: center;'>Ordem dos Carmelitas Descalços Seculares</h3>", unsafe_allow_html=True)
         st.markdown("<h5 style='color: #7A4B1E; font-family: serif; text-align: center; margin-top: -10px;'>Província São José</h5>", unsafe_allow_html=True)
         st.markdown("---")
@@ -227,7 +238,7 @@ if menu == "📋 Listar Membros":
             dados.append({
                 "ID": m.id,
                 "Nome": m.nome,
-                "Nome Religioso": m.nome_religioso,
+                "Nome Religioso": m.nome_religioso or "-",
                 "Comunidade": m.comunidade or "-",
                 "Regional": m.regional or "-",
                 "Admissão": m.data_admissao or "-",
@@ -257,7 +268,7 @@ elif menu == "➕ Cadastrar Novo":
             endereco = st.text_input("Endereço")
             bairro = st.text_input("Bairro")
             cidade = st.text_input("Cidade")
-            comunidade = st.text_input("Comunidade")
+            comunidade = st.text_input("Comunidade", value="Alegria da Sagrada Face Itapetininga")
             regional = st.selectbox("Regional", [
                 "1 - Regional São João da Cruz",
                 "2 - Regional Santa Teresinha do Menino Jesus e da Santa Face"
@@ -285,7 +296,7 @@ elif menu == "➕ Cadastrar Novo":
             else:
                 existente = db.query(Membro).filter(func.lower(Membro.nome) == nome.strip().lower()).first()
                 if existente:
-                    st.warning(f"⚠️ O membro '{nome}' já possui cadastro no banco (ID #{existente.id}). Utilize a aba de Edição para alterar os dados.")
+                    st.warning(f"⚠️ O membro '{nome}' já possui cadastro no banco (ID #{existente.id}).")
                 else:
                     novo_membro = Membro(
                         nome=nome.strip(), nome_religioso=nome_religioso, data_nascimento=data_nascimento,
@@ -303,22 +314,22 @@ elif menu == "➕ Cadastrar Novo":
 
 # --- OPÇÃO 3: EDITAR / AFASTAMENTOS / EXCLUIR ---
 elif menu == "✏️ Editar / Afastamentos / Excluir":
-    st.subheader("✏️ Edição e Registro de Afastamentos")
+    st.subheader("✏️ Edição Completa e Registro de Afastamentos")
     membros = db.query(Membro).all()
     if not membros:
         st.info("Nenhum membro cadastrado.")
     else:
         opcoes_membros = {f"{m.id} - {m.nome}": m.id for m in membros}
-        selecionado = st.selectbox("Selecione o membro:", list(opcoes_membros.keys()))
+        selecionado = st.selectbox("Selecione o membro para editar:", list(opcoes_membros.keys()))
         membro_id = opcoes_membros[selecionado]
         membro = db.query(Membro).filter(Membro.id == membro_id).first()
 
         if membro:
-            tab1, tab2 = st.tabs(["Dados Cadastrais", "Afastamentos"])
+            tab1, tab2 = st.tabs(["Dados Cadastrais e OCDS", "Afastamentos"])
 
             with tab1:
                 with st.form("form_edicao"):
-                    st.markdown("#### Dados Pessoais")
+                    st.markdown("#### 1. Dados Pessoais")
                     c1, c2 = st.columns(2)
                     with c1:
                         nome = st.text_input("Nome", value=membro.nome or "")
@@ -332,13 +343,14 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                         endereco = st.text_input("Endereço", value=membro.endereco or "")
                         bairro = st.text_input("Bairro", value=membro.bairro or "")
                         cidade = st.text_input("Cidade", value=membro.cidade or "")
-                        comunidade = st.text_input("Comunidade", value=membro.comunidade or "")
+                        comunidade = st.text_input("Comunidade", value=membro.comunidade or "Alegria da Sagrada Face Itapetininga")
+                        reg_index = 0 if "São João" in (membro.regional or "") else 1
                         regional = st.selectbox("Regional", [
                             "1 - Regional São João da Cruz",
                             "2 - Regional Santa Teresinha do Menino Jesus e da Santa Face"
-                        ], index=0 if "São João" in (membro.regional or "") else 1)
+                        ], index=reg_index)
 
-                    st.markdown("#### Caminhada OCDS")
+                    st.markdown("#### 2. Caminhada OCDS")
                     co1, co2 = st.columns(2)
                     with co1:
                         data_entrada = st.text_input("Data de Entrada", value=membro.data_entrada or "")
@@ -353,7 +365,7 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                         quem_realizou_votos = st.text_input("Quem realizou Votos", value=membro.quem_realizou_votos or "")
                         data_sanatio = st.text_input("Data Sanatio", value=membro.data_sanatio or "")
 
-                    btn_atualizar = st.form_submit_button("Atualizar Dados")
+                    btn_atualizar = st.form_submit_button("Salvar Todas as Alterações")
 
                 if btn_atualizar:
                     membro.nome = nome
@@ -380,10 +392,11 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                     membro.data_sanatio = data_sanatio
 
                     db.commit()
-                    st.success("Dados do membro atualizados com sucesso!")
+                    st.success(f"✅ Ficha cadastral de '{membro.nome}' atualizada com sucesso!")
                     st.rerun()
 
-                if st.button("🗑️ Excluir Membro", type="primary"):
+                st.divider()
+                if st.button("🗑️ Excluir Definitivamente este Membro", type="primary"):
                     db.delete(membro)
                     db.commit()
                     st.warning("Membro excluído com sucesso!")
@@ -423,7 +436,7 @@ elif menu == "✏️ Editar / Afastamentos / Excluir":
                     st.success("Afastamento registrado!")
                     st.rerun()
 
-# --- OPÇÃO 4: RELATÓRIOS ---
+# --- OPÇÃO 4: RELATÓRIOS E IMPRESSÃO EM A4 ---
 elif menu == "📊 Relatórios e Estatísticas":
     st.subheader("📊 Relatórios e Indicadores OCDS")
     
@@ -442,9 +455,169 @@ elif menu == "📊 Relatórios e Estatísticas":
             m_id = opcoes[st.selectbox("Escolha o Membro:", list(opcoes.keys()))]
             m = db.query(Membro).filter(Membro.id == m_id).first()
 
-            st.markdown("---")
-            st.markdown(f"### 📄 Ficha Cadastral: {m.nome}")
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                st.markdown(f"### 📄 Ficha Cadastral: {m.nome}")
             
+            # --- GERADOR DE RELATÓRIO A4 EM HTML/PDF ---
+            html_a4 = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    @page {{
+                        size: A4;
+                        margin: 15mm 15mm 15mm 15mm;
+                    }}
+                    body {{
+                        font-family: 'Georgia', 'Times New Roman', serif;
+                        color: #2b1a0e;
+                        line-height: 1.4;
+                        margin: 0;
+                    }}
+                    .header {{
+                        text-align: center;
+                        border-bottom: 2px solid #4A2C11;
+                        padding-bottom: 10px;
+                        margin-bottom: 15px;
+                    }}
+                    .logo {{
+                        width: 80px;
+                        height: auto;
+                    }}
+                    .title {{
+                        font-size: 18pt;
+                        font-weight: bold;
+                        color: #4A2C11;
+                        margin-top: 5px;
+                    }}
+                    .subtitle {{
+                        font-size: 12pt;
+                        color: #7A4B1E;
+                        font-style: italic;
+                    }}
+                    .section-title {{
+                        font-size: 12pt;
+                        font-weight: bold;
+                        background-color: #f5efe9;
+                        color: #4A2C11;
+                        padding: 4px 8px;
+                        margin-top: 15px;
+                        margin-bottom: 8px;
+                        border-left: 4px solid #4A2C11;
+                    }}
+                    table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-bottom: 10px;
+                    }}
+                    td {{
+                        padding: 4px 6px;
+                        font-size: 10pt;
+                        vertical-align: top;
+                    }}
+                    .label {{
+                        font-weight: bold;
+                        color: #4A2C11;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <img src="{LOGO_URL}" class="logo"><br>
+                    <div class="title">Ordem dos Carmelitas Descalços Seculares</div>
+                    <div class="subtitle">Província São José - Ficha Cadastral do Membro</div>
+                </div>
+
+                <div class="section-title">1. Dados Pessoais</div>
+                <table>
+                    <tr>
+                        <td width="50%"><span class="label">Nome Completo:</span> {m.nome or '-'}</td>
+                        <td width="50%"><span class="label">Nome Religioso:</span> {m.nome_religioso or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">Data Nasc.:</span> {m.data_nascimento or '-'}</td>
+                        <td><span class="label">Estado Civil:</span> {m.estado_civil or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">RG:</span> {m.rg or '-'}</td>
+                        <td><span class="label">CPF:</span> {m.cpf or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2"><span class="label">Cônjuge:</span> {m.conjuge or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2"><span class="label">Endereço:</span> {m.endereco or '-'}, {m.bairro or '-'}, {m.cidade or '-'}</td>
+                    </tr>
+                </table>
+
+                <div class="section-title">2. Vinculação OCDS</div>
+                <table>
+                    <tr>
+                        <td width="50%"><span class="label">Regional:</span> {m.regional or '-'}</td>
+                        <td width="50%"><span class="label">Comunidade:</span> {m.comunidade or '-'}</td>
+                    </tr>
+                </table>
+
+                <div class="section-title">3. Caminhada OCDS</div>
+                <table>
+                    <tr>
+                        <td width="50%"><span class="label">Data de Entrada:</span> {m.data_entrada or '-'}</td>
+                        <td width="50%"><span class="label">Data de Sanatio:</span> {m.data_sanatio or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">Admissão:</span> {m.data_admissao or '-'}</td>
+                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_admissao or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">Promessas Temporárias:</span> {m.data_promessas_temp or '-'}</td>
+                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_promessas_temp or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">Promessas Definitivas:</span> {m.data_promessas_def or '-'}</td>
+                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_promessas_def or '-'}</td>
+                    </tr>
+                    <tr>
+                        <td><span class="label">Votos:</span> {m.data_votos or '-'}</td>
+                        <td><span class="label">Quem Realizou:</span> {m.quem_realizou_votos or '-'}</td>
+                    </tr>
+                </table>
+
+                <div class="section-title">4. Histórico de Afastamentos</div>
+            """
+            
+            if m.afastamentos:
+                html_a4 += "<table><tr style='font-weight:bold;'><td>Afastamento</td><td>Retorno</td><td>Motivo</td></tr>"
+                for af in m.afastamentos:
+                    html_a4 += f"<tr><td>{af.data_afastamento or '-'}</td><td>{af.data_retorno or 'Atual'}</td><td>{af.motivo or '-'}</td></tr>"
+                html_a4 += "</table>"
+            else:
+                html_a4 += "<p style='font-size:10pt;'>Nenhum afastamento registrado.</p>"
+
+            html_a4 += """
+            </body>
+            </html>
+            """
+
+            # Botão de Impressão A4
+            with col_b:
+                if HAS_WEASYPRINT:
+                    pdf_bytes = HTML(string=html_a4).write_pdf()
+                    st.download_button(
+                        label="🖨️ Imprimir Ficha (A4 PDF)",
+                        data=pdf_bytes,
+                        file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.pdf",
+                        mime="application/pdf"
+                    )
+                else:
+                    st.download_button(
+                        label="🖨️ Baixar Ficha A4 (HTML)",
+                        data=html_a4,
+                        file_name=f"Ficha_OCDS_{m.nome.replace(' ', '_')}.html",
+                        mime="text/html"
+                    )
+
             c1, c2 = st.columns(2)
             with c1:
                 st.write(f"**Nome Religioso:** {m.nome_religioso or '-'}")
@@ -519,75 +692,23 @@ elif menu == "📊 Relatórios e Estatísticas":
 
 # --- OPÇÃO 5: GESTÃO E MANUTENÇÃO (ADM) ---
 elif menu == "🔐 Gestão e Manutenção" and user_role == "adm":
-    st.subheader("🔐 Gestão de Senhas e Consolidador Inteligente")
+    st.subheader("🔐 Gestão de Senhas")
     
-    tab_senha, tab_limpeza = st.tabs(["Alteração de Senhas", "🧩 Mesclagem e Consolidação de Dados"])
+    users = st.session_state["usuarios_db"]
+    usuario_alvo = st.selectbox("Selecione o usuário:", list(users.keys()), format_func=lambda u: f"{u} ({users[u]['nome']})")
 
-    with tab_senha:
-        st.markdown("#### Alteração de Senhas dos Usuários")
-        users = st.session_state["usuarios_db"]
-        usuario_alvo = st.selectbox("Selecione o usuário:", list(users.keys()), format_func=lambda u: f"{u} ({users[u]['nome']})")
+    with st.form("form_senha"):
+        nova_senha = st.text_input("Nova Senha", type="password")
+        confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
+        btn_mudar_senha = st.form_submit_button("Atualizar Senha")
 
-        with st.form("form_senha"):
-            nova_senha = st.text_input("Nova Senha", type="password")
-            confirma_senha = st.text_input("Confirme a Nova Senha", type="password")
-            btn_mudar_senha = st.form_submit_button("Atualizar Senha")
-
-            if btn_mudar_senha:
-                if not nova_senha:
-                    st.error("A senha não pode estar em branco.")
-                elif nova_senha != confirma_senha:
-                    st.error("As senhas digitadas não coincidem.")
-                else:
-                    st.session_state["usuarios_db"][usuario_alvo]["senha"] = nova_senha
-                    st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
-
-    with tab_limpeza:
-        st.markdown("#### Consolidar e Unificar Fichas Duplicadas")
-        st.info("Esta função analisa os cadastros com o mesmo nome e junta (mescla) **todas as informações preenchidas** de cada uma das cópias em uma única ficha completa antes de remover as duplicatas.")
-        
-        membros_todos = db.query(Membro).order_by(Membro.id).all()
-        grupos_duplicados = {}
-
-        for m in membros_todos:
-            chave = m.nome.strip().lower()
-            if chave not in grupos_duplicados:
-                grupos_duplicados[chave] = []
-            grupos_duplicados[chave].append(m)
-
-        duplicados_encontrados = {k: v for k, v in grupos_duplicados.items() if len(v) > 1}
-
-        if duplicados_encontrados:
-            st.warning(f"Encontrados **{len(duplicados_encontrados)} membro(s)** com registros duplicados no banco.")
-            
-            if st.button("🔄 Consolidar e Mesclar Fichas Sem Perder Dados", type="primary"):
-                colunas_para_mesclar = [
-                    'nome_religioso', 'data_nascimento', 'rg', 'cpf', 'estado_civil',
-                    'conjuge', 'endereco', 'bairro', 'cidade', 'comunidade', 'regional',
-                    'data_entrada', 'data_admissao', 'quem_realizou_admissao',
-                    'data_promessas_temp', 'quem_realizou_promessas_temp',
-                    'data_promessas_def', 'quem_realizou_promessas_def',
-                    'data_votos', 'quem_realizou_votos', 'data_sanatio'
-                ]
-
-                for chave, lista_membros in duplicados_encontrados.items():
-                    m_principal = lista_membros[0]
-                    for m_duplicado in lista_membros[1:]:
-                        for col in colunas_para_mesclar:
-                            v_p = getattr(m_principal, col)
-                            v_d = getattr(m_duplicado, col)
-                            if (not v_p or str(v_p).strip() == "" or str(v_p) == "-") and v_d and str(v_d).strip() != "":
-                                setattr(m_principal, col, v_d)
-                        
-                        for af in m_duplicado.afastamentos:
-                            af.membro_id = m_principal.id
-                        
-                        db.delete(m_duplicado)
-
-                db.commit()
-                st.success("✅ Fichas consolidadas com sucesso! Todas as informações foram unificadas na ficha principal.")
-                st.rerun()
-        else:
-            st.success("✅ Todas as fichas estão consolidadas e sem duplicidades!")
+        if btn_mudar_senha:
+            if not nova_senha:
+                st.error("A senha não pode estar em branco.")
+            elif nova_senha != confirma_senha:
+                st.error("As senhas digitadas não coincidem.")
+            else:
+                st.session_state["usuarios_db"][usuario_alvo]["senha"] = nova_senha
+                st.success(f"Senha do usuário '{usuario_alvo}' atualizada com sucesso!")
 
 db.close()
