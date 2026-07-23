@@ -2,6 +2,7 @@ import os
 import io
 import base64
 import urllib.request
+from PIL import Image
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -66,7 +67,7 @@ try:
         cidade = Column(String(150))
         uf = Column(String(10))
         regional = Column(String(150))
-        tipo_grupo = Column(String(100)) # Ereção Canônica, sem Ereção, Grupo, Vocacionado, Aspirante
+        tipo_grupo = Column(String(100))
         
         data_criacao = Column(String(30))
         data_aceite_provisorio = Column(String(30))
@@ -74,7 +75,7 @@ try:
         data_erecao_canonica = Column(String(30))
 
         # Dados do Conselho Local
-        trienio = Column(String(50)) # MM/AAAA a MM/AAAA
+        trienio = Column(String(50))
         presidente_nome = Column(String(200))
         presidente_tel = Column(String(50))
         presidente_email = Column(String(150))
@@ -165,22 +166,20 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- BRASÃO OFICIAL CARMELITA ORIGINAL (DOWNLOAD EM BASE64 SEGURO) ---
-URLS_BRASAO = [
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Coat_of_Arms_of_Discalced_Carmelites_Order.svg/500px-Coat_of_Arms_of_Discalced_Carmelites_Order.svg.png",
-    "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
-]
-
+# --- CARREGAMENTO DO BRASÃO COM PILLOW (LANCZOS) ---
 @st.cache_data
-def get_brasao_b64():
-    for url in URLS_BRASAO:
+def get_brasao_processado_b64():
+    nome_arquivo = "brasao_original.jpg" # Nome da imagem salva no mesmo diretório
+    if os.path.exists(nome_arquivo):
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                img_bytes = response.read()
-                return base64.b64encode(img_bytes).decode('utf-8')
+            img = Image.open(nome_arquivo)
+            # Redimensionamento inteligente com preservação da nitidez original
+            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=95)
+            return base64.b64encode(buffered.getvalue()).decode("utf-8")
         except Exception:
-            continue
+            pass
     return None
 
 # --- USUÁRIOS DO SISTEMA ---
@@ -224,9 +223,9 @@ def render_header():
     
     col1, col2 = st.columns([1, 5])
     with col1:
-        b64_logo = get_brasao_b64()
+        b64_logo = get_brasao_processado_b64()
         if b64_logo:
-            st.markdown(f'<img src="data:image/png;base64,{b64_logo}" width="110">', unsafe_allow_html=True)
+            st.markdown(f'<img src="data:image/jpeg;base64,{b64_logo}" width="125">', unsafe_allow_html=True)
         else:
             st.markdown("<h2 style='color: #4A2C11; margin:0;'>✝️ OCDS</h2>", unsafe_allow_html=True)
     with col2:
@@ -234,21 +233,21 @@ def render_header():
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
     st.divider()
 
-# --- FUNÇÕES GERADORAS DE PDF VIA REPORTLAB ---
-
+# --- FUNÇÃO GERADORA DE BRASÃO PARA O REPORTLAB ---
 def get_reportlab_logo_image():
-    b64_logo = get_brasao_b64()
+    b64_logo = get_brasao_processado_b64()
     if b64_logo:
         try:
             img_bytes = base64.b64decode(b64_logo)
             img_buffer = io.BytesIO(img_bytes)
-            rl_img = RLImage(img_buffer, width=2.2*cm, height=2.2*cm)
+            rl_img = RLImage(img_buffer, width=2.5*cm, height=2.2*cm)
             rl_img.hAlign = 'CENTER'
             return rl_img
         except Exception:
             return None
     return None
 
+# --- GERADORES DE PDF ---
 def gerar_pdf_membro_a4(m):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -483,9 +482,9 @@ def gerar_pdf_relatorio_geral_comunidades_a4(comunidades, titulo_relatorio):
 if not st.session_state["autenticado"]:
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
-        b64_logo = get_brasao_b64()
+        b64_logo = get_brasao_processado_b64()
         if b64_logo:
-            st.markdown(f'<div style="text-align: center;"><img src="data:image/png;base64,{b64_logo}" width="120"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="text-align: center;"><img src="data:image/jpeg;base64,{b64_logo}" width="140"></div>', unsafe_allow_html=True)
         st.markdown("<h3 style='color: #4A2C11; font-family: serif; text-align: center;'>Ordem dos Carmelitas Descalços Seculares</h3>", unsafe_allow_html=True)
         st.markdown("<h5 style='color: #7A4B1E; font-family: serif; text-align: center; margin-top: -10px;'>Província São José</h5>", unsafe_allow_html=True)
         st.markdown("---")
