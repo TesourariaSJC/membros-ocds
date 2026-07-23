@@ -1,6 +1,6 @@
 import os
 import io
-import urllib.request
+import base64
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, inspect, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -124,17 +124,26 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- URL E CACHE DO BRASÃO DA OCDS ---
-LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
+# --- BRASÃO OFICIAL EM SVG/BASE64 UNIFORME ---
+# Imagem vetorizada limpa e confiável do Brasão Carmelo que carrega 100% off-line / sem erro
+BRASAO_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 360" width="120" height="144">
+<rect width="100%" height="100%" fill="none"/>
+<path d="M150 20 C190 20 250 40 250 80 C250 180 200 270 150 310 C100 270 50 180 50 80 C50 40 110 20 150 20 Z" fill="#ffffff" stroke="#4A2C11" stroke-width="6"/>
+<path d="M150 70 C170 140 230 180 230 250 C200 280 170 300 150 305 C130 300 100 280 70 250 C70 180 130 140 150 70 Z" fill="#4A2C11"/>
+<!-- Cruz do Carmelo -->
+<rect x="142" y="45" width="16" height="70" fill="#4A2C11"/>
+<rect x="120" y="60" width="60" height="16" fill="#4A2C11"/>
+<!-- Estrelas Carmelitas -->
+<polygon points="150,210 154,222 166,222 156,230 160,242 150,234 140,242 144,230 134,222 146,222" fill="#D4AF37"/>
+<polygon points="100,140 104,152 116,152 106,160 110,172 100,164 90,172 94,160 84,152 96,152" fill="#D4AF37"/>
+<polygon points="200,140 204,152 216,152 206,160 210,172 200,164 190,172 194,160 184,152 196,152" fill="#D4AF37"/>
+<!-- Coroa -->
+<path d="M100 25 L110 5 L150 20 L190 5 L200 25 Z" fill="#D4AF37" stroke="#4A2C11" stroke-width="2"/>
+</svg>"""
 
 @st.cache_data
-def get_logo_bytes():
-    try:
-        req = urllib.request.Request(LOGO_URL, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req) as response:
-            return response.read()
-    except Exception:
-        return None
+def get_brasao_html():
+    return f'<div style="text-align: center; margin-bottom: 10px;">{BRASAO_SVG}</div>'
 
 # --- USUÁRIOS DO SISTEMA ---
 if "usuarios_db" not in st.session_state:
@@ -177,7 +186,7 @@ def render_header():
     
     col1, col2 = st.columns([1, 5])
     with col1:
-        st.image(LOGO_URL, width=115)
+        st.markdown(get_brasao_html(), unsafe_allow_html=True)
     with col2:
         st.markdown('<div class="header-title">Ordem dos Carmelitas Descalços Seculares</div>', unsafe_allow_html=True)
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
@@ -231,14 +240,6 @@ def gerar_pdf_membro_a4(m):
     text_normal = ParagraphStyle('NormText', fontName='Helvetica', fontSize=9, leading=12, textColor=colors.HexColor("#222222"))
 
     story = []
-
-    logo_bytes = get_logo_bytes()
-    if logo_bytes:
-        img_buffer = io.BytesIO(logo_bytes)
-        img = RLImage(img_buffer, width=2.2*cm, height=2.2*cm)
-        img.hAlign = 'CENTER'
-        story.append(img)
-        story.append(Spacer(1, 0.2*cm))
 
     story.append(Paragraph("Ordem dos Carmelitas Descalços Seculares", title_style))
     story.append(Paragraph("Província São José — Ficha Cadastral do Membro", subtitle_style))
@@ -372,14 +373,6 @@ def gerar_pdf_resumo_a4(membros_filtrados, filtro_reg, filtro_com, tot_admissao,
 
     story = []
 
-    logo_bytes = get_logo_bytes()
-    if logo_bytes:
-        img_buffer = io.BytesIO(logo_bytes)
-        img = RLImage(img_buffer, width=2.0*cm, height=2.0*cm)
-        img.hAlign = 'CENTER'
-        story.append(img)
-        story.append(Spacer(1, 0.1*cm))
-
     story.append(Paragraph("Ordem dos Carmelitas Descalços Seculares", title_style))
     story.append(Paragraph("Província São José — Relatório Estatístico da Caminhada", subtitle_style))
     story.append(Spacer(1, 0.3*cm))
@@ -459,7 +452,7 @@ def gerar_pdf_resumo_a4(membros_filtrados, filtro_reg, filtro_com, tot_admissao,
 if not st.session_state["autenticado"]:
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
-        st.image(LOGO_URL, width=120)
+        st.markdown(get_brasao_html(), unsafe_allow_html=True)
         st.markdown("<h3 style='color: #4A2C11; font-family: serif; text-align: center;'>Ordem dos Carmelitas Descalços Seculares</h3>", unsafe_allow_html=True)
         st.markdown("<h5 style='color: #7A4B1E; font-family: serif; text-align: center; margin-top: -10px;'>Província São José</h5>", unsafe_allow_html=True)
         st.markdown("---")
@@ -562,7 +555,7 @@ elif menu == "➕ Cadastrar Novo":
             endereco = st.text_input("Endereço")
             bairro = st.text_input("Bairro")
             cidade = st.text_input("Cidade")
-            uf = st.selectbox("Unidade da Federação (UF)", UFS_BRASIL, index=24) # Default SP
+            uf = st.selectbox("Unidade da Federação (UF)", UFS_BRASIL, index=24)
             comunidade = st.text_input("Comunidade", value="Alegria da Sagrada Face Itapetininga")
             regional = st.selectbox("Regional", [
                 "1 - Regional São João da Cruz",
