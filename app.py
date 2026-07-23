@@ -165,18 +165,23 @@ except Exception as e:
 def get_db():
     return SessionLocal()
 
-# --- CARREGAMENTO GARANTIDO DO BRASÃO ORIGINAL DA OCDS ---
-URL_BRASAO_ORIGINAL = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
+# --- BRASÃO OFICIAL CARMELITA ORIGINAL (DOWNLOAD EM BASE64 SEGURO) ---
+URLS_BRASAO = [
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Coat_of_Arms_of_Discalced_Carmelites_Order.svg/500px-Coat_of_Arms_of_Discalced_Carmelites_Order.svg.png",
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Coat_of_arms_of_Carmelites.svg/500px-Coat_of_arms_of_Carmelites.svg.png"
+]
 
 @st.cache_data
 def get_brasao_b64():
-    try:
-        req = urllib.request.Request(URL_BRASAO_ORIGINAL, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
-        with urllib.request.urlopen(req) as response:
-            img_bytes = response.read()
-            return base64.b64encode(img_bytes).decode('utf-8')
-    except Exception:
-        return None
+    for url in URLS_BRASAO:
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                img_bytes = response.read()
+                return base64.b64encode(img_bytes).decode('utf-8')
+        except Exception:
+            continue
+    return None
 
 # --- USUÁRIOS DO SISTEMA ---
 if "usuarios_db" not in st.session_state:
@@ -223,7 +228,7 @@ def render_header():
         if b64_logo:
             st.markdown(f'<img src="data:image/png;base64,{b64_logo}" width="110">', unsafe_allow_html=True)
         else:
-            st.write("✝️ **OCDS**")
+            st.markdown("<h2 style='color: #4A2C11; margin:0;'>✝️ OCDS</h2>", unsafe_allow_html=True)
     with col2:
         st.markdown('<div class="header-title">Ordem dos Carmelitas Descalços Seculares</div>', unsafe_allow_html=True)
         st.markdown('<div class="header-subtitle">Província São José</div>', unsafe_allow_html=True)
@@ -368,6 +373,62 @@ def gerar_pdf_comunidade_a4(c, membros_comunidade):
     buffer.seek(0)
     return buffer.getvalue()
 
+def gerar_pdf_membros_lista_a4(membros_lista, titulo_relatorio):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle('T1', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=15, leading=18, textColor=colors.HexColor("#4A2C11"), alignment=1)
+    subtitle_style = ParagraphStyle('T2', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=14, textColor=colors.HexColor("#7A4B1E"), alignment=1)
+    section_style = ParagraphStyle('S1', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10, leading=13, textColor=colors.HexColor("#FFFFFF"), backColor=colors.HexColor("#4A2C11"), spaceBefore=8, spaceAfter=4, borderPadding=3)
+    text_bold = ParagraphStyle('TB', fontName='Helvetica-Bold', fontSize=8, leading=10, textColor=colors.HexColor("#4A2C11"))
+    text_normal = ParagraphStyle('TN', fontName='Helvetica', fontSize=8, leading=10, textColor=colors.HexColor("#222222"))
+
+    story = []
+    logo = get_reportlab_logo_image()
+    if logo:
+        story.append(logo)
+        story.append(Spacer(1, 0.2*cm))
+
+    story.append(Paragraph("Ordem dos Carmelitas Descalços Seculares", title_style))
+    story.append(Paragraph(f"Província São José — {titulo_relatorio}", subtitle_style))
+    story.append(Spacer(1, 0.3*cm))
+
+    story.append(Paragraph(f"LISTAGEM DOS MEMBROS ({len(membros_lista)} Registros)", section_style))
+
+    table_data = [[
+        Paragraph("<b>Nome Completo</b>", text_bold),
+        Paragraph("<b>Nome Religioso</b>", text_bold),
+        Paragraph("<b>Comunidade</b>", text_bold),
+        Paragraph("<b>Regional</b>", text_bold),
+        Paragraph("<b>Admissão</b>", text_bold),
+        Paragraph("<b>Prom. Def.</b>", text_bold)
+    ]]
+
+    for m in membros_lista:
+        table_data.append([
+            Paragraph(m.nome or "-", text_normal),
+            Paragraph(m.nome_religioso or "-", text_normal),
+            Paragraph(m.comunidade or "-", text_normal),
+            Paragraph(m.regional or "-", text_normal),
+            Paragraph(m.data_admissao or "-", text_normal),
+            Paragraph(m.data_promessas_def or "-", text_normal)
+        ])
+
+    t = Table(table_data, colWidths=[4.5*cm, 3.5*cm, 4*cm, 3*cm, 1.5*cm, 1.5*cm])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EFE8E1")),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3)
+    ]))
+    story.append(t)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 def gerar_pdf_relatorio_geral_comunidades_a4(comunidades, titulo_relatorio):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.5*cm, leftMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
@@ -465,7 +526,6 @@ st.sidebar.divider()
 
 if user_role == "adm":
     opcoes_menu = [
-        "📋 Listar Membros",
         "➕ Cadastrar Membro",
         "🏰 Cadastrar / Gerenciar Comunidade ou Grupo",
         "✏️ Editar / Afastamentos / Excluir Membro",
@@ -474,45 +534,20 @@ if user_role == "adm":
     ]
 elif user_role == "inclusao":
     opcoes_menu = [
-        "📋 Listar Membros",
         "➕ Cadastrar Membro",
         "🏰 Cadastrar / Gerenciar Comunidade ou Grupo",
         "📊 Relatórios e Estatísticas"
     ]
 else:
     opcoes_menu = [
-        "📋 Listar Membros",
         "📊 Relatórios e Estatísticas"
     ]
 
 menu = st.sidebar.radio("📌 Navegação", opcoes_menu)
 db = get_db()
 
-# --- OPÇÃO 1: LISTAR MEMBROS ---
-if menu == "📋 Listar Membros":
-    st.subheader("📋 Membros Cadastrados")
-    membros = db.query(Membro).all()
-    if membros:
-        dados = []
-        for m in membros:
-            dados.append({
-                "ID": m.id,
-                "Nome": m.nome,
-                "Nome Religioso": m.nome_religioso or "-",
-                "UF": m.uf or "-",
-                "Comunidade": m.comunidade or "-",
-                "Regional": m.regional or "-",
-                "Admissão": m.data_admissao or "-",
-                "Prom. Temp.": m.data_promessas_temp or "-",
-                "Prom. Def.": m.data_promessas_def or "-",
-                "Votos": m.data_votos or "-"
-            })
-        st.dataframe(dados, use_container_width=True)
-    else:
-        st.info("Nenhum membro cadastrado ainda.")
-
-# --- OPÇÃO 2: CADASTRAR MEMBRO ---
-elif menu == "➕ Cadastrar Membro":
+# --- OPÇÃO: CADASTRAR MEMBRO ---
+if menu == "➕ Cadastrar Membro":
     st.subheader("➕ Cadastrar Novo Membro")
     comunidades_db = db.query(Comunidade).all()
     lista_comunidades_nomes = [c.nome for c in comunidades_db] if comunidades_db else ["Alegria da Sagrada Face Itapetininga"]
@@ -574,7 +609,7 @@ elif menu == "➕ Cadastrar Membro":
                     db.commit()
                     st.success(f"Membro '{nome}' cadastrado com sucesso!")
 
-# --- OPÇÃO 3: CADASTRO E GESTÃO DE COMUNIDADES / GRUPOS ---
+# --- OPÇÃO: CADASTRO E GESTÃO DE COMUNIDADES / GRUPOS ---
 elif menu == "🏰 Cadastrar / Gerenciar Comunidade ou Grupo":
     st.subheader("🏰 Cadastro e Gestão de Comunidades / Grupos")
     
@@ -740,7 +775,7 @@ elif menu == "🏰 Cadastrar / Gerenciar Comunidade ou Grupo":
                     st.warning("Comunidade excluída com sucesso!")
                     st.rerun()
 
-# --- OPÇÃO 4: EDITAR MEMBROS ---
+# --- OPÇÃO: EDITAR MEMBROS ---
 elif menu == "✏️ Editar / Afastamentos / Excluir Membro":
     st.subheader("✏️ Edição Completa de Membros e Afastamentos")
     membros = db.query(Membro).all()
@@ -870,19 +905,22 @@ elif menu == "✏️ Editar / Afastamentos / Excluir Membro":
                     st.success("Afastamento registrado!")
                     st.rerun()
 
-# --- OPÇÃO 5: RELATÓRIOS E ESTATÍSTICAS ---
+# --- OPÇÃO: RELATÓRIOS E ESTATÍSTICAS ---
 elif menu == "📊 Relatórios e Estatísticas":
     st.subheader("📊 Relatórios e Indicadores OCDS")
     
     tipo_relatorio = st.radio("Selecione o relatório desejado:", [
         "1 - Relatório Individual do Membro", 
-        "2 - Relatório Individual de Comunidade e/ou Grupo",
-        "3 - Relatório Geral da Comunidade com Ereção Canônica",
-        "4 - Relatório Geral das Comunidades sem Ereção Canônica",
-        "5 - Relatório Geral dos Grupos",
-        "6 - Relatório Geral dos Grupos Vocacionados",
-        "7 - Relatório Geral de Grupos Aspirantes",
-        "8 - Resumo Numérico / Estatístico (Filtrável)"
+        "2 - Relatório Geral dos Membros — Geral (Todos os Membros)",
+        "3 - Relatório Geral dos Membros — Por Comunidade",
+        "4 - Relatório Geral dos Membros — Por Regional",
+        "5 - Relatório Individual de Comunidade e/ou Grupo",
+        "6 - Relatório Geral da Comunidade com Ereção Canônica",
+        "7 - Relatório Geral das Comunidades sem Ereção Canônica",
+        "8 - Relatório Geral dos Grupos",
+        "9 - Relatório Geral dos Grupos Vocacionados",
+        "10 - Relatório Geral de Grupos Aspirantes",
+        "11 - Resumo Numérico / Estatístico (Filtrável)"
     ])
 
     membros_all = db.query(Membro).all()
@@ -928,8 +966,75 @@ elif menu == "📊 Relatórios e Estatísticas":
                 st.write(f"**Promessas Def.:** {m.data_promessas_def or '-'} (Por: {m.quem_realizou_promessas_def or '-'})")
                 st.write(f"**Votos:** {m.data_votos or '-'} (Por: {m.quem_realizou_votos or '-'})")
 
-    # --- 2. RELATÓRIO INDIVIDUAL DE COMUNIDADE ---
-    elif tipo_relatorio == "2 - Relatório Individual de Comunidade e/ou Grupo":
+    # --- 2. RELATÓRIO GERAL DOS MEMBROS — GERAL ---
+    elif tipo_relatorio == "2 - Relatório Geral dos Membros — Geral (Todos os Membros)":
+        col_m1, col_m2 = st.columns([3, 1])
+        with col_m1:
+            st.markdown(f"### 👥 Relatório Geral de Todos os Membros ({len(membros_all)} Registros)")
+        with col_m2:
+            pdf_geral_membros = gerar_pdf_membros_lista_a4(membros_all, "Relatório Geral de Todos os Membros")
+            st.download_button(
+                label="🖨️ Imprimir Relatório Geral (PDF)",
+                data=pdf_geral_membros,
+                file_name="Relatorio_Geral_Membros_OCDS.pdf",
+                mime="application/pdf"
+            )
+        if membros_all:
+            dados_m = [{"Nome": m.nome, "Nome Religioso": m.nome_religioso or "-", "Comunidade": m.comunidade or "-", "Regional": m.regional or "-", "Admissão": m.data_admissao or "-", "Prom. Def.": m.data_promessas_def or "-"} for m in membros_all]
+            st.dataframe(dados_m, use_container_width=True)
+        else:
+            st.info("Nenhum membro cadastrado.")
+
+    # --- 3. RELATÓRIO GERAL DOS MEMBROS — POR COMUNIDADE ---
+    elif tipo_relatorio == "3 - Relatório Geral dos Membros — Por Comunidade":
+        coms_existentes = list(set([c.nome for c in comunidades_all] + [m.comunidade for m in membros_all if m.comunidade]))
+        if not coms_existentes:
+            st.info("Nenhuma comunidade encontrada.")
+        else:
+            com_escolhida = st.selectbox("Selecione a Comunidade / Grupo:", coms_existentes)
+            membros_com = [m for m in membros_all if m.comunidade == com_escolhida]
+            
+            col_mc1, col_mc2 = st.columns([3, 1])
+            with col_mc1:
+                st.markdown(f"### 👥 Membros da Comunidade: {com_escolhida} ({len(membros_com)} Registros)")
+            with col_mc2:
+                pdf_com_membros = gerar_pdf_membros_lista_a4(membros_com, f"Relatório de Membros — Comunidade: {com_escolhida}")
+                st.download_button(
+                    label="🖨️ Imprimir Relatório (PDF)",
+                    data=pdf_com_membros,
+                    file_name=f"Relatorio_Membros_{com_escolhida.replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
+            if membros_com:
+                dados_mc = [{"Nome": m.nome, "Nome Religioso": m.nome_religioso or "-", "Regional": m.regional or "-", "Admissão": m.data_admissao or "-", "Prom. Def.": m.data_promessas_def or "-"} for m in membros_com]
+                st.dataframe(dados_mc, use_container_width=True)
+            else:
+                st.info("Nenhum membro vinculado a esta comunidade.")
+
+    # --- 4. RELATÓRIO GERAL DOS MEMBROS — POR REGIONAL ---
+    elif tipo_relatorio == "4 - Relatório Geral dos Membros — Por Regional":
+        reg_escolhida = st.selectbox("Selecione a Regional:", REGIONAIS_OCDS)
+        membros_reg = [m for m in membros_all if m.regional == reg_escolhida]
+        
+        col_mr1, col_mr2 = st.columns([3, 1])
+        with col_mr1:
+            st.markdown(f"### 👥 Membros do {reg_escolhida} ({len(membros_reg)} Registros)")
+        with col_mr2:
+            pdf_reg_membros = gerar_pdf_membros_lista_a4(membros_reg, f"Relatório de Membros — {reg_escolhida}")
+            st.download_button(
+                label="🖨️ Imprimir Relatório (PDF)",
+                data=pdf_reg_membros,
+                file_name=f"Relatorio_Membros_{reg_escolhida.replace(' ', '_')}.pdf",
+                mime="application/pdf"
+            )
+        if membros_reg:
+            dados_mr = [{"Nome": m.nome, "Nome Religioso": m.nome_religioso or "-", "Comunidade": m.comunidade or "-", "Admissão": m.data_admissao or "-", "Prom. Def.": m.data_promessas_def or "-"} for m in membros_reg]
+            st.dataframe(dados_mr, use_container_width=True)
+        else:
+            st.info("Nenhum membro vinculado a esta regional.")
+
+    # --- 5. RELATÓRIO INDIVIDUAL DE COMUNIDADE ---
+    elif tipo_relatorio == "5 - Relatório Individual de Comunidade e/ou Grupo":
         if not comunidades_all:
             st.info("Nenhuma comunidade cadastrada.")
         else:
@@ -978,20 +1083,20 @@ elif menu == "📊 Relatórios e Estatísticas":
             else:
                 st.write("Nenhum membro vinculado a esta comunidade até o momento.")
 
-    # --- 3 A 7. RELATÓRIOS GERAIS DE COMUNIDADES POR TIPO ---
+    # --- 6 A 10. RELATÓRIOS GERAIS DE COMUNIDADES POR TIPO ---
     elif tipo_relatorio in [
-        "3 - Relatório Geral da Comunidade com Ereção Canônica",
-        "4 - Relatório Geral das Comunidades sem Ereção Canônica",
-        "5 - Relatório Geral dos Grupos",
-        "6 - Relatório Geral dos Grupos Vocacionados",
-        "7 - Relatório Geral de Grupos Aspirantes"
+        "6 - Relatório Geral da Comunidade com Ereção Canônica",
+        "7 - Relatório Geral das Comunidades sem Ereção Canônica",
+        "8 - Relatório Geral dos Grupos",
+        "9 - Relatório Geral dos Grupos Vocacionados",
+        "10 - Relatório Geral de Grupos Aspirantes"
     ]:
         filtro_tipo_map = {
-            "3 - Relatório Geral da Comunidade com Ereção Canônica": "Comunidade com Ereção Canônica",
-            "4 - Relatório Geral das Comunidades sem Ereção Canônica": "Comunidade sem Ereção Canônica",
-            "5 - Relatório Geral dos Grupos": "Grupo",
-            "6 - Relatório Geral dos Grupos Vocacionados": "Grupo Vocacionado",
-            "7 - Relatório Geral de Grupos Aspirantes": "Grupo Aspirante"
+            "6 - Relatório Geral da Comunidade com Ereção Canônica": "Comunidade com Ereção Canônica",
+            "7 - Relatório Geral das Comunidades sem Ereção Canônica": "Comunidade sem Ereção Canônica",
+            "8 - Relatório Geral dos Grupos": "Grupo",
+            "9 - Relatório Geral dos Grupos Vocacionados": "Grupo Vocacionado",
+            "10 - Relatório Geral de Grupos Aspirantes": "Grupo Aspirante"
         }
         tipo_alvo = filtro_tipo_map[tipo_relatorio]
         filtradas = [c for c in comunidades_all if c.tipo_grupo == tipo_alvo]
@@ -1024,7 +1129,7 @@ elif menu == "📊 Relatórios e Estatísticas":
         else:
             st.warning(f"Nenhum registro encontrado para '{tipo_alvo}'.")
 
-    # --- 8. RESUMO ESTATÍSTICO GERAL DE MEMBROS ---
+    # --- 11. RESUMO ESTATÍSTICO GERAL DE MEMBROS ---
     else:
         st.markdown("### 📈 Resumo Estatístico Geral")
         
@@ -1072,7 +1177,7 @@ elif menu == "📊 Relatórios e Estatísticas":
             })
         st.dataframe(dados_resumo, use_container_width=True)
 
-# --- OPÇÃO 6: GESTÃO E MANUTENÇÃO (ADM) ---
+# --- OPÇÃO: GESTÃO E MANUTENÇÃO (ADM) ---
 elif menu == "🔐 Gestão e Manutenção" and user_role == "adm":
     st.subheader("🔐 Gestão de Senhas do Sistema")
     
