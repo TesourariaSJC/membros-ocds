@@ -33,6 +33,7 @@ REGIONAIS_OCDS = [
 TIPOS_COMUNIDADE = [
     "Comunidade com Ereção Canônica",
     "Comunidade sem Ereção Canônica",
+    "Grupo",
     "Grupo Vocacionado",
     "Grupo Aspirante"
 ]
@@ -65,7 +66,7 @@ try:
         cidade = Column(String(150))
         uf = Column(String(10))
         regional = Column(String(150))
-        tipo_grupo = Column(String(100)) # Ereção Canônica, sem Ereção, Vocacionado, Aspirante
+        tipo_grupo = Column(String(100)) # Ereção Canônica, sem Ereção, Grupo, Vocacionado, Aspirante
         
         data_criacao = Column(String(30))
         data_aceite_provisorio = Column(String(30))
@@ -110,7 +111,6 @@ try:
         regional = Column(String(150))
 
         data_entrada = Column(String(30))
-        data_erecao_canonica = Column(String(30))
         data_admissao = Column(String(30))
         quem_realizou_admissao = Column(String(200))
         data_promessas_temp = Column(String(30))
@@ -141,7 +141,7 @@ try:
             colunas_membros = [c['name'] for c in inspector.get_columns("membros")]
             novas = {
                 "comunidade": "VARCHAR(150)", "regional": "VARCHAR(150)", "uf": "VARCHAR(10)",
-                "data_entrada": "VARCHAR(30)", "data_erecao_canonica": "VARCHAR(30)",
+                "data_entrada": "VARCHAR(30)",
                 "data_admissao": "VARCHAR(30)", "quem_realizou_admissao": "VARCHAR(200)",
                 "data_promessas_temp": "VARCHAR(30)", "quem_realizou_promessas_temp": "VARCHAR(200)",
                 "data_promessas_def": "VARCHAR(30)", "quem_realizou_promessas_def": "VARCHAR(200)",
@@ -288,12 +288,11 @@ def gerar_pdf_membro_a4(m):
 
     story.append(Paragraph("3. CAMINHADA E ETAPAS OCDS", section_style))
     data_ocds = [
-        [Paragraph("<b>Data de Entrada:</b>", text_bold), Paragraph(m.data_entrada or "-", text_normal), Paragraph("<b>Ereção Canônica:</b>", text_bold), Paragraph(m.data_erecao_canonica or "-", text_normal)],
+        [Paragraph("<b>Data de Entrada:</b>", text_bold), Paragraph(m.data_entrada or "-", text_normal), Paragraph("<b>Sanatio:</b>", text_bold), Paragraph(m.data_sanatio or "-", text_normal)],
         [Paragraph("<b>Admissão:</b>", text_bold), Paragraph(m.data_admissao or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_admissao or "-", text_normal)],
         [Paragraph("<b>Promessas Temp.:</b>", text_bold), Paragraph(m.data_promessas_temp or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_temp or "-", text_normal)],
         [Paragraph("<b>Promessas Def.:</b>", text_bold), Paragraph(m.data_promessas_def or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_promessas_def or "-", text_normal)],
-        [Paragraph("<b>Votos:</b>", text_bold), Paragraph(m.data_votos or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_votos or "-", text_normal)],
-        [Paragraph("<b>Sanatio:</b>", text_bold), Paragraph(m.data_sanatio or "-", text_normal), Paragraph("", text_normal), Paragraph("", text_normal)]
+        [Paragraph("<b>Votos:</b>", text_bold), Paragraph(m.data_votos or "-", text_normal), Paragraph("<b>Realizada por:</b>", text_bold), Paragraph(m.quem_realizou_votos or "-", text_normal)]
     ]
     t3 = Table(data_ocds, colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 5.5*cm])
     t3.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#FAF8F5")), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#E2D8CD")), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('TOPPADDING', (0,0), (-1,-1), 4), ('BOTTOMPADDING', (0,0), (-1,-1), 4)]))
@@ -541,7 +540,6 @@ elif menu == "➕ Cadastrar Membro":
         col_ocds1, col_ocds2 = st.columns(2)
         with col_ocds1:
             data_entrada = st.text_input("Data de Entrada na OCDS")
-            data_erecao_canonica = st.text_input("Data da Ereção Canônica")
             data_admissao = st.text_input("Data da Admissão")
             quem_realizou_admissao = st.text_input("Quem realizou a Admissão")
             data_promessas_temp = st.text_input("Data das Promessas Temporárias")
@@ -566,7 +564,7 @@ elif menu == "➕ Cadastrar Membro":
                         nome=nome.strip(), nome_religioso=nome_religioso, data_nascimento=data_nascimento,
                         rg=rg, cpf=cpf, estado_civil=estado_civil, conjuge=conjuge,
                         endereco=endereco, bairro=bairro, cidade=cidade, uf=uf, comunidade=comunidade,
-                        regional=regional, data_entrada=data_entrada, data_erecao_canonica=data_erecao_canonica,
+                        regional=regional, data_entrada=data_entrada,
                         data_admissao=data_admissao, quem_realizou_admissao=quem_realizou_admissao,
                         data_promessas_temp=data_promessas_temp, quem_realizou_promessas_temp=quem_realizou_promessas_temp,
                         data_promessas_def=data_promessas_def, quem_realizou_promessas_def=quem_realizou_promessas_def,
@@ -789,7 +787,6 @@ elif menu == "✏️ Editar / Afastamentos / Excluir Membro":
                     co1, co2 = st.columns(2)
                     with co1:
                         data_entrada = st.text_input("Data de Entrada", value=membro.data_entrada or "")
-                        data_erecao_canonica = st.text_input("Data da Ereção Canônica", value=membro.data_erecao_canonica or "")
                         data_admissao = st.text_input("Data Admissão", value=membro.data_admissao or "")
                         quem_realizou_admissao = st.text_input("Quem realizou Admissão", value=membro.quem_realizou_admissao or "")
                         data_promessas_temp = st.text_input("Data Prom. Temp.", value=membro.data_promessas_temp or "")
@@ -818,7 +815,6 @@ elif menu == "✏️ Editar / Afastamentos / Excluir Membro":
                     membro.comunidade = comunidade
                     membro.regional = regional
                     membro.data_entrada = data_entrada
-                    membro.data_erecao_canonica = data_erecao_canonica
                     membro.data_admissao = data_admissao
                     membro.quem_realizou_admissao = quem_realizou_admissao
                     membro.data_promessas_temp = data_promessas_temp
@@ -883,9 +879,10 @@ elif menu == "📊 Relatórios e Estatísticas":
         "2 - Relatório Individual de Comunidade e/ou Grupo",
         "3 - Relatório Geral da Comunidade com Ereção Canônica",
         "4 - Relatório Geral das Comunidades sem Ereção Canônica",
-        "5 - Relatório Geral dos Grupos Vocacionados",
-        "6 - Relatório Geral de Grupos Aspirantes",
-        "7 - Resumo Numérico / Estatístico (Filtrável)"
+        "5 - Relatório Geral dos Grupos",
+        "6 - Relatório Geral dos Grupos Vocacionados",
+        "7 - Relatório Geral de Grupos Aspirantes",
+        "8 - Resumo Numérico / Estatístico (Filtrável)"
     ])
 
     membros_all = db.query(Membro).all()
@@ -926,7 +923,6 @@ elif menu == "📊 Relatórios e Estatísticas":
                 st.write(f"**Comunidade:** {m.comunidade or '-'}")
                 st.write(f"**Regional:** {m.regional or '-'}")
                 st.write(f"**Data de Entrada:** {m.data_entrada or '-'}")
-                st.write(f"**Ereção Canônica:** {m.data_erecao_canonica or '-'}")
                 st.write(f"**Admissão:** {m.data_admissao or '-'} (Por: {m.quem_realizou_admissao or '-'})")
                 st.write(f"**Promessas Temp.:** {m.data_promessas_temp or '-'} (Por: {m.quem_realizou_promessas_temp or '-'})")
                 st.write(f"**Promessas Def.:** {m.data_promessas_def or '-'} (Por: {m.quem_realizou_promessas_def or '-'})")
@@ -982,18 +978,20 @@ elif menu == "📊 Relatórios e Estatísticas":
             else:
                 st.write("Nenhum membro vinculado a esta comunidade até o momento.")
 
-    # --- 3 A 6. RELATÓRIOS GERAIS DE COMUNIDADES POR TIPO ---
+    # --- 3 A 7. RELATÓRIOS GERAIS DE COMUNIDADES POR TIPO ---
     elif tipo_relatorio in [
         "3 - Relatório Geral da Comunidade com Ereção Canônica",
         "4 - Relatório Geral das Comunidades sem Ereção Canônica",
-        "5 - Relatório Geral dos Grupos Vocacionados",
-        "6 - Relatório Geral de Grupos Aspirantes"
+        "5 - Relatório Geral dos Grupos",
+        "6 - Relatório Geral dos Grupos Vocacionados",
+        "7 - Relatório Geral de Grupos Aspirantes"
     ]:
         filtro_tipo_map = {
             "3 - Relatório Geral da Comunidade com Ereção Canônica": "Comunidade com Ereção Canônica",
             "4 - Relatório Geral das Comunidades sem Ereção Canônica": "Comunidade sem Ereção Canônica",
-            "5 - Relatório Geral dos Grupos Vocacionados": "Grupo Vocacionado",
-            "6 - Relatório Geral de Grupos Aspirantes": "Grupo Aspirante"
+            "5 - Relatório Geral dos Grupos": "Grupo",
+            "6 - Relatório Geral dos Grupos Vocacionados": "Grupo Vocacionado",
+            "7 - Relatório Geral de Grupos Aspirantes": "Grupo Aspirante"
         }
         tipo_alvo = filtro_tipo_map[tipo_relatorio]
         filtradas = [c for c in comunidades_all if c.tipo_grupo == tipo_alvo]
@@ -1026,7 +1024,7 @@ elif menu == "📊 Relatórios e Estatísticas":
         else:
             st.warning(f"Nenhum registro encontrado para '{tipo_alvo}'.")
 
-    # --- 7. RESUMO ESTATÍSTICO GERAL DE MEMBROS ---
+    # --- 8. RESUMO ESTATÍSTICO GERAL DE MEMBROS ---
     else:
         st.markdown("### 📈 Resumo Estatístico Geral")
         
